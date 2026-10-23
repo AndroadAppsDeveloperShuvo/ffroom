@@ -11,6 +11,7 @@ export interface RoomInfo {
 export interface PeerUser {
   id: string;
   name: string;
+  isHost?: boolean;
   isMuted: boolean;
   isSpeaking: boolean;
   joinedAt: number;

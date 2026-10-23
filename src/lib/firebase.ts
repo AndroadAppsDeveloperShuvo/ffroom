@@ -1,5 +1,16 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getDatabase, ref, set, onValue, push, remove, Database } from 'firebase/database';
+import {
+  getDatabase,
+  ref,
+  set,
+  onValue,
+  push,
+  remove,
+  update,
+  onDisconnect,
+  Database,
+} from 'firebase/database';
+import { PeerUser, ChatMessage } from '../types';
 
 export const firebaseConfig = {
   databaseURL: 'https://ffroomsestem-default-rtdb.firebaseio.com/',
@@ -20,52 +31,212 @@ try {
 
 export { app, database };
 
-// Sync room metadata to Firebase RTDB
-export async function syncRoomToFirebase(roomId: string, data: Record<string, any>) {
-  if (!database) return false;
+// Join a room in Firebase RTDB with automatic onDisconnect cleanup
+export async function joinFirebaseRoomPresence(
+  roomId: string,
+  peer: { id: string; name: string; isHost: boolean; isMuted?: boolean }
+) {
+  if (!database) return null;
+  const cleanId = roomId.trim().toUpperCase();
   try {
-    const roomRef = ref(database, `rooms/${roomId}`);
-    await set(roomRef, {
-      ...data,
-      updatedAt: Date.now(),
+    const peerRef = ref(database, `rooms/${cleanId}/peers/${peer.id}`);
+    const metadataRef = ref(database, `rooms/${cleanId}/metadata`);
+
+    // Ensure metadata exists or set creator
+    onValue(
+      metadataRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          set(metadataRef, {
+            roomId: cleanId,
+            hostId: peer.id,
+            hostName: peer.name,
+            createdAt: Date.now(),
+          }).catch(() => {});
+        }
+      },
+      { onlyOnce: true }
+    );
+
+    // Save peer data
+    const peerData = {
+      id: peer.id,
+      name: peer.name,
+      isHost: peer.isHost,
+      isMuted: peer.isMuted ?? false,
+      isSpeaking: false,
+      joinedAt: Date.now(),
+    };
+
+    await set(peerRef, peerData);
+
+    // When peer disconnects or tab closes, automatically remove them
+    onDisconnect(peerRef).remove().catch(() => {});
+
+    return peerData;
+  } catch (err) {
+    console.warn('Firebase join presence notice:', err);
+    return null;
+  }
+}
+
+// Update local peer state (mic, speaking) in Firebase RTDB
+export function updateFirebasePeerState(
+  roomId: string,
+  peerId: string,
+  state: { isMuted?: boolean; isSpeaking?: boolean }
+) {
+  if (!database) return;
+  const cleanId = roomId.trim().toUpperCase();
+  try {
+    const peerRef = ref(database, `rooms/${cleanId}/peers/${peerId}`);
+    update(peerRef, state).catch(() => {});
+  } catch (e) {
+    console.warn('Firebase state update notice:', e);
+  }
+}
+
+// Remove peer on leave
+export function leaveFirebaseRoomPresence(roomId: string, peerId: string) {
+  if (!database) return;
+  const cleanId = roomId.trim().toUpperCase();
+  try {
+    const peerRef = ref(database, `rooms/${cleanId}/peers/${peerId}`);
+    remove(peerRef).catch(() => {});
+  } catch (e) {
+    console.warn('Firebase leave notice:', e);
+  }
+}
+
+// Listen to all active peers in the room
+export function subscribeFirebasePeers(
+  roomId: string,
+  currentPeerId: string,
+  callback: (peers: PeerUser[], metadata: any) => void
+) {
+  if (!database) return () => {};
+  const cleanId = roomId.trim().toUpperCase();
+  try {
+    const roomRef = ref(database, `rooms/${cleanId}`);
+    const unsubscribe = onValue(roomRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) {
+        callback([], null);
+        return;
+      }
+
+      const peersMap = data.peers || {};
+      const metadata = data.metadata || null;
+
+      const activePeers: PeerUser[] = Object.values(peersMap)
+        .filter((p: any) => p && p.id && p.id !== currentPeerId)
+        .map((p: any) => ({
+          id: p.id,
+          name: p.name || 'Duo Player',
+          isMuted: Boolean(p.isMuted),
+          isSpeaking: Boolean(p.isSpeaking),
+          joinedAt: p.joinedAt || Date.now(),
+        }));
+
+      callback(activePeers, metadata);
+    });
+
+    return () => unsubscribe();
+  } catch (err) {
+    console.warn('Firebase subscribe peers notice:', err);
+    return () => {};
+  }
+}
+
+// WebRTC Signaling via Firebase RTDB
+export async function sendFirebaseSignal(
+  roomId: string,
+  targetPeerId: string,
+  signal: { senderPeerId: string; signalType: string; data: any }
+) {
+  if (!database) return false;
+  const cleanId = roomId.trim().toUpperCase();
+  try {
+    const signalRef = push(ref(database, `rooms/${cleanId}/signals/${targetPeerId}`));
+    await set(signalRef, {
+      ...signal,
+      timestamp: Date.now(),
     });
     return true;
-  } catch (err) {
-    console.warn('Firebase RTDB sync notice (may require open database rules):', err);
+  } catch (e) {
+    console.warn('Firebase signal send notice:', e);
     return false;
+  }
+}
+
+// Listen to incoming signals for this peer
+export function subscribeFirebaseSignals(
+  roomId: string,
+  myPeerId: string,
+  callback: (signal: { senderPeerId: string; signalType: string; data: any }) => void
+) {
+  const db = database;
+  if (!db) return () => {};
+  const cleanId = roomId.trim().toUpperCase();
+  try {
+    const mySignalsRef = ref(db, `rooms/${cleanId}/signals/${myPeerId}`);
+    const unsubscribe = onValue(mySignalsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        // Iterate over incoming signals
+        Object.entries(data).forEach(([key, val]: [string, any]) => {
+          if (val && val.signalType) {
+            callback(val);
+            // Delete processed signal to prevent duplicates
+            remove(ref(db, `rooms/${cleanId}/signals/${myPeerId}/${key}`)).catch(() => {});
+          }
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  } catch (e) {
+    console.warn('Firebase subscribe signals notice:', e);
+    return () => {};
   }
 }
 
 // Push chat message to Firebase RTDB
-export async function pushChatMessageToFirebase(roomId: string, message: Record<string, any>) {
+export async function pushFirebaseChatMessage(roomId: string, message: ChatMessage) {
   if (!database) return false;
+  const cleanId = roomId.trim().toUpperCase();
   try {
-    const messagesRef = ref(database, `rooms/${roomId}/messages`);
-    const newMsgRef = push(messagesRef);
-    await set(newMsgRef, message);
+    const msgRef = ref(database, `rooms/${cleanId}/messages/${message.id}`);
+    await set(msgRef, message);
     return true;
   } catch (err) {
-    console.warn('Firebase RTDB message sync notice:', err);
+    console.warn('Firebase chat push notice:', err);
     return false;
   }
 }
 
-// Listen to room updates from Firebase
-export function subscribeFirebaseRoom(roomId: string, callback: (data: any) => void) {
+// Subscribe to room messages
+export function subscribeFirebaseChatMessages(
+  roomId: string,
+  callback: (messages: ChatMessage[]) => void
+) {
   if (!database) return () => {};
+  const cleanId = roomId.trim().toUpperCase();
   try {
-    const roomRef = ref(database, `rooms/${roomId}`);
-    const unsubscribe = onValue(roomRef, (snapshot) => {
-      const val = snapshot.val();
-      if (val) {
-        callback(val);
+    const messagesRef = ref(database, `rooms/${cleanId}/messages`);
+    const unsubscribe = onValue(messagesRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data && typeof data === 'object') {
+        const msgs = Object.values(data) as ChatMessage[];
+        // Sort by timestamp
+        msgs.sort((a, b) => a.timestamp - b.timestamp);
+        callback(msgs);
       }
-    }, (error) => {
-      console.warn('Firebase listen notice:', error);
     });
+
     return () => unsubscribe();
-  } catch (err) {
-    console.warn('Firebase subscription error:', err);
+  } catch (e) {
+    console.warn('Firebase chat subscribe notice:', e);
     return () => {};
   }
 }

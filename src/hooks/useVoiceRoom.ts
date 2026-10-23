@@ -1,7 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ChatMessage, PeerUser } from '../types';
 import { playSound } from '../lib/soundEffects';
-import { syncRoomToFirebase, pushChatMessageToFirebase, subscribeFirebaseRoom } from '../lib/firebase';
+import {
+  joinFirebaseRoomPresence,
+  leaveFirebaseRoomPresence,
+  updateFirebasePeerState,
+  subscribeFirebasePeers,
+  sendFirebaseSignal,
+  subscribeFirebaseSignals,
+  pushFirebaseChatMessage,
+  subscribeFirebaseChatMessages,
+} from '../lib/firebase';
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -15,12 +24,15 @@ export function useVoiceRoom() {
   const [roomId, setRoomId] = useState<string | null>(null);
   const roomIdRef = useRef<string | null>(null);
 
+  const [isHost, setIsHost] = useState(false);
+  const isHostRef = useRef(false);
+
   const [userName, setUserName] = useState<string>(() => {
     return localStorage.getItem('ff_user_name') || `Player_${Math.floor(1000 + Math.random() * 9000)}`;
   });
   const userNameRef = useRef(userName);
 
-  // Truly unique peerId per tab / window instance
+  // Guaranteed unique peerId per tab / window instance
   const peerIdRef = useRef<string>(
     `peer_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`
   );
@@ -30,8 +42,12 @@ export function useVoiceRoom() {
     'idle' | 'connecting' | 'waiting_partner' | 'connected' | 'call_connected' | 'error'
   >('idle');
   const [partner, setPartner] = useState<PeerUser | null>(null);
+  const partnerRef = useRef<PeerUser | null>(null);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isMuted, setIsMuted] = useState(false);
+  const isMutedRef = useRef(false);
+
   const [isDeafened, setIsDeafened] = useState(false);
   const [localVolume, setLocalVolume] = useState(0);
   const [remoteVolume, setRemoteVolume] = useState(0);
@@ -47,8 +63,6 @@ export function useVoiceRoom() {
   const remoteAnalyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const timerIntervalRef = useRef<any>(null);
-  const isInitiatorRef = useRef<boolean>(false);
-  const syncIntervalRef = useRef<any>(null);
 
   // Keep refs in sync
   useEffect(() => {
@@ -58,6 +72,18 @@ export function useVoiceRoom() {
   useEffect(() => {
     userNameRef.current = userName;
   }, [userName]);
+
+  useEffect(() => {
+    isHostRef.current = isHost;
+  }, [isHost]);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  useEffect(() => {
+    partnerRef.current = partner;
+  }, [partner]);
 
   // Save username to local storage
   const updateUserName = useCallback((newName: string) => {
@@ -69,7 +95,7 @@ export function useVoiceRoom() {
     }
   }, []);
 
-  // Audio elements setup
+  // Audio element setup for remote audio stream
   useEffect(() => {
     const audio = new Audio();
     audio.autoplay = true;
@@ -89,7 +115,7 @@ export function useVoiceRoom() {
 
   // Call timer
   useEffect(() => {
-    if (partner && connectionStatus === 'call_connected') {
+    if (partner && (connectionStatus === 'call_connected' || connectionStatus === 'connected')) {
       timerIntervalRef.current = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
@@ -103,57 +129,6 @@ export function useVoiceRoom() {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
   }, [partner, connectionStatus]);
-
-  // Periodic REST message sync (ensures messages from creator or joiner are NEVER missed)
-  useEffect(() => {
-    if (!roomId) {
-      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
-      return;
-    }
-
-    const fetchLatestMessages = async () => {
-      try {
-        const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/messages`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.messages)) {
-            setMessages((prev) => {
-              const existingIds = new Set(prev.map((m) => m.id));
-              const incoming = data.messages.filter((m: ChatMessage) => !existingIds.has(m.id));
-              if (incoming.length === 0) return prev;
-              return [...prev, ...incoming];
-            });
-          }
-        }
-      } catch {
-        // silent sync fallback
-      }
-    };
-
-    // Immediate initial sync
-    fetchLatestMessages();
-
-    // Poll every 2.5 seconds as safety net
-    syncIntervalRef.current = setInterval(fetchLatestMessages, 2500);
-
-    // Also subscribe to Firebase RTDB for real-time room sync
-    const unsubscribeFirebase = subscribeFirebaseRoom(roomId, (roomData) => {
-      if (roomData?.messages && typeof roomData.messages === 'object') {
-        const fbMessages = Object.values(roomData.messages) as ChatMessage[];
-        setMessages((prev) => {
-          const existingIds = new Set(prev.map((m) => m.id));
-          const incoming = fbMessages.filter((m: ChatMessage) => m.id && !existingIds.has(m.id));
-          if (incoming.length === 0) return prev;
-          return [...prev, ...incoming];
-        });
-      }
-    });
-
-    return () => {
-      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
-      unsubscribeFirebase();
-    };
-  }, [roomId]);
 
   // Audio level meter loop
   useEffect(() => {
@@ -173,7 +148,9 @@ export function useVoiceRoom() {
         const isSpeaking = !isMuted && vol > 12;
         if (isSpeaking && Date.now() - lastSpeakingTime > 300) {
           lastSpeakingTime = Date.now();
-          sendWsMessage('peer-state-update', { isMuted, isSpeaking: true });
+          if (roomIdRef.current) {
+            updateFirebasePeerState(roomIdRef.current, peerId, { isMuted, isSpeaking: true });
+          }
         }
       }
 
@@ -196,7 +173,7 @@ export function useVoiceRoom() {
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [isMuted, isDeafened]);
+  }, [isMuted, isDeafened, peerId]);
 
   // Setup Web Audio Analyser
   const setupAudioAnalyser = (stream: MediaStream, isLocal: boolean) => {
@@ -217,13 +194,6 @@ export function useVoiceRoom() {
       }
     } catch (e) {
       console.warn('AudioContext setup notice:', e);
-    }
-  };
-
-  // Helper to send message over WebSocket
-  const sendWsMessage = (type: string, payload: any) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type, payload }));
     }
   };
 
@@ -248,6 +218,17 @@ export function useVoiceRoom() {
     }
   };
 
+  // Send WebRTC signal (over Firebase RTDB)
+  const dispatchSignal = (targetId: string, signalType: string, data: any) => {
+    if (roomIdRef.current) {
+      sendFirebaseSignal(roomIdRef.current, targetId, {
+        senderPeerId: peerId,
+        signalType,
+        data,
+      });
+    }
+  };
+
   // Create RTCPeerConnection
   const createPeerConnection = (targetId: string) => {
     if (pcRef.current) {
@@ -259,7 +240,7 @@ export function useVoiceRoom() {
     const pc = new RTCPeerConnection(ICE_SERVERS);
     pcRef.current = pc;
 
-    // Add local audio tracks if ready
+    // Add local tracks if available
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         pc.addTrack(track, localStreamRef.current!);
@@ -268,11 +249,7 @@ export function useVoiceRoom() {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        sendWsMessage('signal', {
-          targetPeerId: targetId,
-          signalType: 'ice-candidate',
-          data: event.candidate,
-        });
+        dispatchSignal(targetId, 'ice-candidate', event.candidate);
       }
     };
 
@@ -297,23 +274,18 @@ export function useVoiceRoom() {
     return pc;
   };
 
-  // Initiate WebRTC Call (as caller)
+  // Initiate WebRTC Call (Host calls the joining partner)
   const initiateCall = async (targetId: string) => {
     try {
       await initLocalAudio();
       const pc = createPeerConnection(targetId);
-      isInitiatorRef.current = true;
 
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
       });
       await pc.setLocalDescription(offer);
 
-      sendWsMessage('signal', {
-        targetPeerId: targetId,
-        signalType: 'offer',
-        data: offer,
-      });
+      dispatchSignal(targetId, 'offer', offer);
     } catch (err) {
       console.warn('Notice initiating WebRTC call:', err);
     }
@@ -322,12 +294,10 @@ export function useVoiceRoom() {
   // Handle incoming WebRTC signal
   const handleSignal = async (payload: { senderPeerId: string; signalType: string; data: any }) => {
     const { senderPeerId, signalType, data } = payload;
-
     try {
       if (signalType === 'offer') {
         await initLocalAudio();
         const pc = createPeerConnection(senderPeerId);
-        isInitiatorRef.current = false;
 
         await pc.setRemoteDescription(new RTCSessionDescription(data));
 
@@ -341,11 +311,7 @@ export function useVoiceRoom() {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
-        sendWsMessage('signal', {
-          targetPeerId: senderPeerId,
-          signalType: 'answer',
-          data: answer,
-        });
+        dispatchSignal(senderPeerId, 'answer', answer);
       } else if (signalType === 'answer') {
         if (pcRef.current) {
           await pcRef.current.setRemoteDescription(new RTCSessionDescription(data));
@@ -368,133 +334,54 @@ export function useVoiceRoom() {
     }
   };
 
-  // Connect to Room
-  const joinRoom = useCallback((targetRoomId: string, customName?: string) => {
-    if (!targetRoomId) return;
-    const cleanRoomId = targetRoomId.trim().toUpperCase();
-    const finalName = customName || userNameRef.current;
+  // Connect to Room via Firebase RTDB (Global real-time presence & signaling)
+  const joinRoom = useCallback(
+    async (targetRoomId: string, customName?: string, asHost: boolean = false) => {
+      if (!targetRoomId) return;
+      const cleanRoomId = targetRoomId.trim().toUpperCase();
+      const finalName = customName || userNameRef.current;
 
-    // Clean up previous socket if any
-    if (wsRef.current) {
-      try {
-        wsRef.current.close();
-      } catch {}
-      wsRef.current = null;
-    }
+      setRoomId(cleanRoomId);
+      roomIdRef.current = cleanRoomId;
+      setIsHost(asHost);
+      isHostRef.current = asHost;
+      setConnectionStatus('connecting');
+      setErrorMessage(null);
 
-    setRoomId(cleanRoomId);
-    roomIdRef.current = cleanRoomId;
-    setConnectionStatus('connecting');
-    setErrorMessage(null);
+      // Request mic access
+      initLocalAudio().catch(() => {});
 
-    // Request mic access
-    initLocalAudio().catch(() => {});
+      // 1. Join Firebase RTDB Presence
+      await joinFirebaseRoomPresence(cleanRoomId, {
+        id: peerId,
+        name: finalName,
+        isHost: asHost,
+      });
 
-    // Setup WebSocket
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+      // 2. Subscribe to Firebase Peers in this Room
+      const unsubPeers = subscribeFirebasePeers(cleanRoomId, peerId, (activePeers, metadata) => {
+        // If there is an active peer in the room
+        if (activePeers.length > 0) {
+          const other = activePeers[0];
+          const isOtherHost = Boolean(metadata && metadata.hostId === other.id);
 
-    ws.onopen = () => {
-      ws.send(
-        JSON.stringify({
-          type: 'join-room',
-          payload: {
-            roomId: cleanRoomId,
-            peerId,
-            userName: finalName,
-          },
-        })
-      );
-    };
+          setPartner({
+            ...other,
+            isHost: isOtherHost,
+          });
+          setConnectionStatus('connected');
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        const { type, payload } = msg;
-
-        switch (type) {
-          case 'room-joined': {
-            // Receive past messages from the room so joiner immediately sees creator's messages
-            if (payload.messages && Array.isArray(payload.messages)) {
-              setMessages((prev) => {
-                const existingIds = new Set(prev.map((m) => m.id));
-                const newOnes = payload.messages.filter((m: ChatMessage) => !existingIds.has(m.id));
-                return [...prev, ...newOnes];
-              });
-            }
-
-            if (payload.peers && payload.peers.length > 0) {
-              const existingPartner = payload.peers[0];
-              setPartner({
-                id: existingPartner.peerId,
-                name: existingPartner.userName,
-                isMuted: existingPartner.isMuted,
-                isSpeaking: false,
-                joinedAt: Date.now(),
-              });
-              setConnectionStatus('connected');
-              playSound('join');
-              initiateCall(existingPartner.peerId);
-            } else {
-              setPartner(null);
-              setConnectionStatus('waiting_partner');
-            }
-
-            // Sync room to Firebase RTDB
-            syncRoomToFirebase(cleanRoomId, {
-              roomId: cleanRoomId,
-              creatorName: finalName,
-              activePeersCount: (payload.peers?.length || 0) + 1,
-              status: payload.peers?.length > 0 ? 'connected' : 'waiting',
-            });
-            break;
-          }
-
-          case 'peer-joined': {
-            setPartner({
-              id: payload.peerId,
-              name: payload.userName,
-              isMuted: false,
-              isSpeaking: false,
-              joinedAt: Date.now(),
-            });
-            setConnectionStatus('connected');
+          // If partner just joined and we don't have active call connection, initiate WebRTC
+          if (!partnerRef.current || partnerRef.current.id !== other.id) {
             playSound('join');
-            initiateCall(payload.peerId);
-            break;
+            // Host initiates call to partner, or if both connected, first peer initiates
+            if (isHostRef.current || (!isOtherHost && peerId < other.id)) {
+              initiateCall(other.id);
+            }
           }
-
-          case 'signal': {
-            handleSignal(payload);
-            break;
-          }
-
-          case 'chat-message': {
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === payload.id)) return prev;
-              return [...prev, payload];
-            });
-            playSound('message');
-            break;
-          }
-
-          case 'peer-state-update': {
-            setPartner((prev) => {
-              if (!prev || prev.id !== payload.peerId) return prev;
-              return {
-                ...prev,
-                isMuted: typeof payload.isMuted === 'boolean' ? payload.isMuted : prev.isMuted,
-                isSpeaking: typeof payload.isSpeaking === 'boolean' ? payload.isSpeaking : prev.isSpeaking,
-              };
-            });
-            break;
-          }
-
-          case 'peer-left': {
-            setPartner(null);
-            setConnectionStatus('waiting_partner');
+        } else {
+          // No other partner yet
+          if (partnerRef.current) {
             playSound('leave');
             if (pcRef.current) {
               try {
@@ -506,33 +393,45 @@ export function useVoiceRoom() {
               remoteAudioRef.current.srcObject = null;
             }
             setRemoteVolume(0);
-            break;
           }
-
-          default:
-            break;
+          setPartner(null);
+          setConnectionStatus('waiting_partner');
         }
-      } catch (e) {
-        console.error('Error processing WS message:', e);
-      }
-    };
+      });
 
-    ws.onerror = (e) => {
-      console.warn('WebSocket connection error:', e);
-    };
+      // 3. Subscribe to WebRTC Signals via Firebase RTDB
+      const unsubSignals = subscribeFirebaseSignals(cleanRoomId, peerId, (signal) => {
+        handleSignal(signal);
+      });
 
-    ws.onclose = () => {
-      setConnectionStatus((prev) => (prev === 'idle' ? 'idle' : 'waiting_partner'));
-    };
-  }, [peerId]);
+      // 4. Subscribe to Chat Messages via Firebase RTDB
+      const unsubMessages = subscribeFirebaseChatMessages(cleanRoomId, (msgs) => {
+        setMessages(msgs);
+      });
+
+      // Store unsubs in window/ref for cleanup on leave
+      (window as any).__firebaseRoomUnsubs = [unsubPeers, unsubSignals, unsubMessages];
+    },
+    [peerId]
+  );
 
   // Leave room
   const leaveRoom = useCallback(() => {
     playSound('leave');
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'leave-room' }));
-      wsRef.current.close();
+
+    if (roomIdRef.current) {
+      leaveFirebaseRoomPresence(roomIdRef.current, peerId);
     }
+
+    if (Array.isArray((window as any).__firebaseRoomUnsubs)) {
+      (window as any).__firebaseRoomUnsubs.forEach((unsub: any) => {
+        try {
+          unsub();
+        } catch {}
+      });
+      (window as any).__firebaseRoomUnsubs = [];
+    }
+
     if (pcRef.current) {
       try {
         pcRef.current.close();
@@ -550,6 +449,7 @@ export function useVoiceRoom() {
     setRoomId(null);
     roomIdRef.current = null;
     setPartner(null);
+    setIsHost(false);
     setConnectionStatus('idle');
     setMessages([]);
     setCallDuration(0);
@@ -560,7 +460,7 @@ export function useVoiceRoom() {
     const url = new URL(window.location.href);
     url.searchParams.delete('room');
     window.history.replaceState({}, '', url.toString());
-  }, []);
+  }, [peerId]);
 
   // Toggle Mic Mute
   const toggleMute = useCallback(() => {
@@ -572,9 +472,12 @@ export function useVoiceRoom() {
       });
       setIsMuted(nextMuted);
       playSound(nextMuted ? 'mute' : 'unmute');
-      sendWsMessage('peer-state-update', { isMuted: nextMuted, isSpeaking: false });
+
+      if (roomIdRef.current) {
+        updateFirebasePeerState(roomIdRef.current, peerId, { isMuted: nextMuted, isSpeaking: false });
+      }
     }
-  }, [isMuted]);
+  }, [isMuted, peerId]);
 
   // Toggle Deafen (Speaker Mute)
   const toggleDeafen = useCallback(() => {
@@ -585,7 +488,7 @@ export function useVoiceRoom() {
     });
   }, []);
 
-  // Send Text or Voice Note Message (Guaranteed delivery: Optimistic + WS + HTTP REST + Firebase RTDB)
+  // Send Text or Voice Note Message (Instant push to Firebase RTDB)
   const sendMessage = useCallback((text: string, audioClip?: string) => {
     if (!text.trim() && !audioClip) return;
     const currentRoom = roomIdRef.current;
@@ -603,33 +506,28 @@ export function useVoiceRoom() {
       audioClip,
     };
 
-    // 1. Optimistic update: show immediately on local screen
+    // Optimistic local update
     setMessages((prev) => {
       if (prev.some((m) => m.id === msgId)) return prev;
       return [...prev, newMsg];
     });
 
-    // 2. Send via WebSocket to all peers
-    sendWsMessage('chat-message', {
-      ...newMsg,
-      roomId: currentRoom,
-    });
+    // Push to Firebase RTDB (global instant real-time sync across devices)
+    pushFirebaseChatMessage(currentRoom, newMsg);
 
-    // 3. Send via HTTP REST endpoint as reliable fallback
+    // Also send to server REST endpoint as backup
     fetch(`/api/rooms/${encodeURIComponent(currentRoom)}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newMsg),
-    }).catch((err) => console.warn('REST message sync notice:', err));
-
-    // 4. Push to Firebase RTDB
-    pushChatMessageToFirebase(currentRoom, newMsg).catch(() => {});
+    }).catch(() => {});
   }, [peerId]);
 
   return {
     roomId,
     peerId,
     userName,
+    isHost,
     updateUserName,
     partner,
     connectionStatus,

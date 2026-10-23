@@ -26,6 +26,7 @@ interface VoiceRoomViewProps {
   roomId: string;
   userName: string;
   peerId: string;
+  isHost: boolean;
   partner: PeerUser | null;
   connectionStatus: 'idle' | 'connecting' | 'waiting_partner' | 'connected' | 'call_connected' | 'error';
   messages: ChatMessage[];
@@ -46,6 +47,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
   roomId,
   userName,
   peerId,
+  isHost,
   partner,
   connectionStatus,
   messages,
@@ -73,7 +75,12 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
     return `${mins.toString().padStart(2, '0')}:${remainingSecs.toString().padStart(2, '0')}`;
   };
 
-  const roomLink = `${window.location.origin}/?room=${encodeURIComponent(roomId)}`;
+  // Ensure public shared URL is used for sharing so Telegram users can access without dev login
+  let publicOrigin = window.location.origin;
+  if (publicOrigin.includes('ais-dev-')) {
+    publicOrigin = publicOrigin.replace('ais-dev-', 'ais-pre-');
+  }
+  const roomLink = `${publicOrigin}/?room=${encodeURIComponent(roomId)}`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(roomLink);
@@ -225,8 +232,12 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                   : 'border-zinc-800'
               }`}
             >
-              <div className="absolute top-3 left-3 px-2 py-0.5 rounded-md bg-orange-500/10 border border-orange-500/30 text-[10px] font-bold text-orange-400 uppercase tracking-wider">
-                হোস্ট / আপনি
+              <div className={`absolute top-3 left-3 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+                isHost
+                  ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                  : 'bg-sky-500/10 border-sky-500/30 text-sky-400'
+              }`}>
+                {isHost ? '👑 রুম হোস্ট (আপনি)' : '🎮 আপনি (ডুও পার্টনার)'}
               </div>
 
               {/* Avatar with speaking wave ring */}
@@ -285,8 +296,12 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                   : 'border-dashed border-zinc-700/80 bg-zinc-900/40'
               }`}
             >
-              <div className="absolute top-3 left-3 px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/30 text-[10px] font-bold text-sky-400 uppercase tracking-wider">
-                ডুও পার্টনার
+              <div className={`absolute top-3 left-3 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+                partner?.isHost
+                  ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                  : 'bg-sky-500/10 border-sky-500/30 text-sky-400'
+              }`}>
+                {partner?.isHost ? '👑 রুম হোস্ট' : '🎮 ডুও পার্টনার'}
               </div>
 
               {partner ? (

@@ -11,6 +11,7 @@ export default function App() {
     roomId,
     peerId,
     userName,
+    isHost,
     updateUserName,
     partner,
     connectionStatus,
@@ -56,8 +57,8 @@ export default function App() {
         hasAutoJoinedRef.current = true;
         const cleaned = roomParam.trim().toUpperCase();
         setUrlRoomId(cleaned);
-        // Automatically join if user clicked directly from Telegram link
-        joinRoom(cleaned);
+        // Automatically join as participant (not host) when clicking link
+        joinRoom(cleaned, undefined, false);
       }
     } catch (e) {
       console.warn('URL parsing error:', e);
@@ -82,6 +83,7 @@ export default function App() {
             roomId={roomId}
             userName={userName}
             peerId={peerId}
+            isHost={isHost}
             partner={partner}
             connectionStatus={connectionStatus}
             messages={messages}

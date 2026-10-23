@@ -20,7 +20,7 @@ import { playSound } from '../lib/soundEffects';
 interface LobbyViewProps {
   userName: string;
   onUpdateUserName: (name: string) => void;
-  onJoinRoom: (roomId: string, hostName?: string) => void;
+  onJoinRoom: (roomId: string, hostName?: string, asHost?: boolean) => void;
   telegramChatId: string;
   onUpdateChatId: (chatId: string) => void;
   initialRoomId?: string;
@@ -86,10 +86,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       }
     }
 
-    // Join room directly
+    // Join room directly as host
     setTimeout(() => {
       setIsCreating(false);
-      onJoinRoom(targetRoomId, userName);
+      onJoinRoom(targetRoomId, userName, true);
     }, 600);
   };
 
@@ -97,7 +97,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
     e.preventDefault();
     const cleaned = joinRoomIdInput.trim().toUpperCase();
     if (cleaned) {
-      onJoinRoom(cleaned, userName);
+      onJoinRoom(cleaned, userName, false);
     }
   };
 
