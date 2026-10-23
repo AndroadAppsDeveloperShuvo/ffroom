@@ -75,12 +75,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
     return `${mins.toString().padStart(2, '0')}:${remainingSecs.toString().padStart(2, '0')}`;
   };
 
-  // Ensure public shared URL is used for sharing so Telegram users can access without dev login
-  let publicOrigin = window.location.origin;
-  if (publicOrigin.includes('ais-dev-')) {
-    publicOrigin = publicOrigin.replace('ais-dev-', 'ais-pre-');
-  }
-  const roomLink = `${publicOrigin}/?room=${encodeURIComponent(roomId)}`;
+  const roomLink = `${window.location.origin}/?room=${encodeURIComponent(roomId)}`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(roomLink);

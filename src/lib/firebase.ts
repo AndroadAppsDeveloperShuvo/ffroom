@@ -31,6 +31,21 @@ try {
 
 export { app, database };
 
+// Remove any undefined values from objects because Firebase RTDB rejects objects with undefined properties
+export function cleanForFirebase(obj: any): any {
+  if (obj === null || obj === undefined) return null;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(cleanForFirebase);
+
+  const clean: Record<string, any> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined) {
+      clean[key] = cleanForFirebase(val);
+    }
+  }
+  return clean;
+}
+
 // Join a room in Firebase RTDB with automatic onDisconnect cleanup
 export async function joinFirebaseRoomPresence(
   roomId: string,
@@ -154,14 +169,16 @@ export async function sendFirebaseSignal(
   targetPeerId: string,
   signal: { senderPeerId: string; signalType: string; data: any }
 ) {
-  if (!database) return false;
+  const db = database;
+  if (!db) return false;
   const cleanId = roomId.trim().toUpperCase();
   try {
-    const signalRef = push(ref(database, `rooms/${cleanId}/signals/${targetPeerId}`));
-    await set(signalRef, {
+    const signalRef = push(ref(db, `rooms/${cleanId}/signals/${targetPeerId}`));
+    const cleanSignal = cleanForFirebase({
       ...signal,
       timestamp: Date.now(),
     });
+    await set(signalRef, cleanSignal);
     return true;
   } catch (e) {
     console.warn('Firebase signal send notice:', e);
@@ -203,11 +220,13 @@ export function subscribeFirebaseSignals(
 
 // Push chat message to Firebase RTDB
 export async function pushFirebaseChatMessage(roomId: string, message: ChatMessage) {
-  if (!database) return false;
+  const db = database;
+  if (!db) return false;
   const cleanId = roomId.trim().toUpperCase();
   try {
-    const msgRef = ref(database, `rooms/${cleanId}/messages/${message.id}`);
-    await set(msgRef, message);
+    const msgRef = ref(db, `rooms/${cleanId}/messages/${message.id}`);
+    const cleanMsg = cleanForFirebase(message);
+    await set(msgRef, cleanMsg);
     return true;
   } catch (err) {
     console.warn('Firebase chat push notice:', err);

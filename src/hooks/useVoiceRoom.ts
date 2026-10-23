@@ -406,11 +406,42 @@ export function useVoiceRoom() {
 
       // 4. Subscribe to Chat Messages via Firebase RTDB
       const unsubMessages = subscribeFirebaseChatMessages(cleanRoomId, (msgs) => {
-        setMessages(msgs);
+        setMessages((prev) => {
+          if (msgs.length > prev.length) {
+            const last = msgs[msgs.length - 1];
+            if (last && last.senderId !== peerId) {
+              playSound('message');
+            }
+          }
+          return msgs;
+        });
       });
 
+      // 5. Secondary HTTP polling fallback (every 2s) to guarantee zero message loss
+      const intervalId = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/rooms/${encodeURIComponent(cleanRoomId)}/messages`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
+              setMessages((prev) => {
+                const existingIds = new Set(prev.map((m) => m.id));
+                const newOnes = data.messages.filter((m: ChatMessage) => !existingIds.has(m.id));
+                if (newOnes.length === 0) return prev;
+                return [...prev, ...newOnes].sort((a, b) => a.timestamp - b.timestamp);
+              });
+            }
+          }
+        } catch {}
+      }, 2000);
+
       // Store unsubs in window/ref for cleanup on leave
-      (window as any).__firebaseRoomUnsubs = [unsubPeers, unsubSignals, unsubMessages];
+      (window as any).__firebaseRoomUnsubs = [
+        unsubPeers,
+        unsubSignals,
+        unsubMessages,
+        () => clearInterval(intervalId),
+      ];
     },
     [peerId]
   );
@@ -503,7 +534,7 @@ export function useVoiceRoom() {
       senderName: currentSenderName,
       text: text.trim(),
       timestamp: Date.now(),
-      audioClip,
+      ...(audioClip ? { audioClip } : {}),
     };
 
     // Optimistic local update

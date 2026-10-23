@@ -104,15 +104,11 @@ app.post('/api/telegram/send', async (req: Request, res: Response) => {
     const token = DEFAULT_TELEGRAM_BOT_TOKEN;
     const targetChatId = chatId || DEFAULT_TELEGRAM_CHAT_ID;
 
-    // Build the direct join URL using public shared domain
-    const fallbackAppUrl = 'https://ais-pre-vmzg6x6qn5z52lj3rgx4zf-12329983830.asia-east1.run.app';
+    // Build the direct join URL using the active live app domain
+    const fallbackAppUrl = 'https://ais-dev-vmzg6x6qn5z52lj3rgx4zf-12329983830.asia-east1.run.app';
     let baseDomain = appOrigin;
     if (!baseDomain || baseDomain.includes('localhost') || baseDomain.includes('127.0.0.1')) {
       baseDomain = (process.env.APP_URL && process.env.APP_URL !== 'MY_APP_URL') ? process.env.APP_URL : fallbackAppUrl;
-    }
-    // Convert dev URL to public shared URL so Telegram users can open without dev login
-    if (baseDomain.includes('ais-dev-')) {
-      baseDomain = baseDomain.replace('ais-dev-', 'ais-pre-');
     }
     const joinUrl = `${baseDomain}/?room=${encodeURIComponent(roomId)}`;
 
