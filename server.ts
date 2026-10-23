@@ -60,42 +60,10 @@ function getOrCreateRoom(roomId: string): RoomState {
   return room;
 }
 
-// API Routes
-app.get('/api/config', (_req: Request, res: Response) => {
-  res.json({
-    firebase: {
-      databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://ffroomsestem-default-rtdb.firebaseio.com/',
-      projectId: process.env.FIREBASE_PROJECT_ID || 'ffroomsestem',
-      appId: process.env.FIREBASE_APP_ID || '1:1080130236833:web:8fbf66b8d9e402d0285be0',
-    },
-    telegram: {
-      defaultChatId: DEFAULT_TELEGRAM_CHAT_ID,
-      hasBotToken: Boolean(DEFAULT_TELEGRAM_BOT_TOKEN),
-      maskedToken: DEFAULT_TELEGRAM_BOT_TOKEN ? `${DEFAULT_TELEGRAM_BOT_TOKEN.slice(0, 10)}...${DEFAULT_TELEGRAM_BOT_TOKEN.slice(-5)}` : '',
-    },
-  });
-});
-
-// Check Telegram Bot Info
-app.get('/api/telegram/bot-info', async (_req: Request, res: Response) => {
-  try {
-    const token = DEFAULT_TELEGRAM_BOT_TOKEN;
-    const response = await fetch(`https://api.telegram.org/bot${token}/getMe`);
-    const data = await response.json();
-    if (data.ok) {
-      res.json({ success: true, bot: data.result });
-    } else {
-      res.status(400).json({ success: false, error: data.description });
-    }
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message || 'Telegram connection failed' });
-  }
-});
-
-// Send Room ID & Direct Link to Telegram Bot
+// Send Room ID to Telegram Bot (private server-side execution without exposing bot tokens)
 app.post('/api/telegram/send', async (req: Request, res: Response) => {
   try {
-    const { roomId, hostName = 'Host', chatId = DEFAULT_TELEGRAM_CHAT_ID, customNote = '', appOrigin } = req.body;
+    const { roomId, hostName = 'Host', chatId = DEFAULT_TELEGRAM_CHAT_ID, customNote = '' } = req.body;
 
     if (!roomId) {
       return res.status(400).json({ success: false, error: 'Room ID is required' });
@@ -104,58 +72,39 @@ app.post('/api/telegram/send', async (req: Request, res: Response) => {
     const token = DEFAULT_TELEGRAM_BOT_TOKEN;
     const targetChatId = chatId || DEFAULT_TELEGRAM_CHAT_ID;
 
-    // Build the direct join URL using the active live app domain
-    const fallbackAppUrl = 'https://ais-dev-vmzg6x6qn5z52lj3rgx4zf-12329983830.asia-east1.run.app';
-    let baseDomain = appOrigin;
-    if (!baseDomain || baseDomain.includes('localhost') || baseDomain.includes('127.0.0.1')) {
-      baseDomain = (process.env.APP_URL && process.env.APP_URL !== 'MY_APP_URL') ? process.env.APP_URL : fallbackAppUrl;
-    }
-    const joinUrl = `${baseDomain}/?room=${encodeURIComponent(roomId)}`;
-
     const banglaTime = new Date().toLocaleTimeString('bn-BD', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
     });
 
+    const siteUrl = 'https://ffroom.vercel.app/';
+
+    // Clean, direct Room ID notification with "সাইট ওপেন করুন" button
     const captionText = 
 `🎮 <b>নতুন ডুও ভয়েস রুম তৈরি হয়েছে!</b>
 ━━━━━━━━━━━━━━━━━━━━
 🆔 <b>রুম আইডি:</b> <code>${roomId}</code>
 👤 <b>হোস্ট:</b> ${hostName}
 ⏰ <b>সময়:</b> ${banglaTime}
-${customNote ? `📝 <b>নোট:</b> ${customNote}\n` : ''}
-⚡ <b>সরাসরি কথা বলতে নিচের লিংকে ক্লিক করে রুমে যোগ দিন:</b>
-👉 <a href="${joinUrl}">${joinUrl}</a>
-━━━━━━━━━━━━━━━━━━━━
-<i>(লিংকে ক্লিক করলে সরাসরি ২ জনের লাইভ ভয়েস রুমে যুক্ত হয়ে কথা বলা যাবে)</i>`;
+${customNote ? `📝 <b>নোট:</b> ${customNote}\n` : ''}━━━━━━━━━━━━━━━━━━━━
+👉 <b>নিচের বাটনে চাপ দিয়ে সাইটে গিয়ে রুম আইডিটি লিখুন এবং সরাসরি রুমে জয়েন করুন।</b>`;
 
-    const isPublicUrl = joinUrl.startsWith('https://') || (joinUrl.startsWith('http://') && !joinUrl.includes('localhost'));
-
-    const telegramPayload: Record<string, any> = {
+    const telegramPayload = {
       chat_id: targetChatId,
       text: captionText,
       parse_mode: 'HTML',
-    };
-
-    if (isPublicUrl) {
-      telegramPayload.reply_markup = {
+      reply_markup: {
         inline_keyboard: [
           [
             {
-              text: '🎙️ সরাসরি রুমে জয়েন করুন (Join Room)',
-              url: joinUrl,
-            },
-          ],
-          [
-            {
               text: '🌐 সাইট ওপেন করুন',
-              url: baseDomain,
+              url: siteUrl,
             },
           ],
         ],
-      };
-    }
+      },
+    };
 
     const tgResponse = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
@@ -169,14 +118,11 @@ ${customNote ? `📝 <b>নোট:</b> ${customNote}\n` : ''}
       return res.json({
         success: true,
         messageId: tgData.result.message_id,
-        chat: tgData.result.chat,
-        joinUrl,
       });
     } else {
       return res.status(400).json({
         success: false,
         error: tgData.description || 'Telegram API error',
-        details: tgData,
       });
     }
   } catch (error: any) {

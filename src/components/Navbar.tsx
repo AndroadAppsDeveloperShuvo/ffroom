@@ -4,16 +4,12 @@ import { Radio, Bot, Edit2, Check, Flame, Volume2, Database } from 'lucide-react
 interface NavbarProps {
   userName: string;
   onUpdateUserName: (name: string) => void;
-  onOpenTelegramModal: () => void;
-  telegramChatId: string;
   connectionStatus: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   userName,
   onUpdateUserName,
-  onOpenTelegramModal,
-  telegramChatId,
   connectionStatus,
 }) => {
   const [isEditingName, setIsEditingName] = useState(false);
@@ -45,28 +41,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-zinc-400 hidden sm:block">
-              ইউনিক রুম ও টেলিগ্রাম বট লাইভ ভয়েস কানেক্ট
+              ইউনিক রুম লাইভ ডুও ভয়েস ও চ্যাট
             </p>
           </div>
-        </div>
-
-        {/* Center Indicators */}
-        <div className="hidden md:flex items-center gap-2">
-          {/* Firebase RTDB Badge */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs">
-            <Database className="w-3.5 h-3.5 text-amber-400" />
-            <span className="text-[11px] font-mono">RTDB: ffroomsestem</span>
-          </div>
-
-          {/* Telegram Status Badge */}
-          <button
-            onClick={onOpenTelegramModal}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-950/40 border border-sky-800/50 text-sky-300 text-xs hover:bg-sky-900/50 transition cursor-pointer"
-            title="টেলিগ্রাম বট কনফিগারেশন দেখুন"
-          >
-            <Bot className="w-3.5 h-3.5 text-sky-400" />
-            <span className="text-[11px]">টেলিগ্রাম বট: {telegramChatId}</span>
-          </button>
         </div>
 
         {/* Right User Tag & Controls */}
@@ -93,7 +70,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             ) : (
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="font-semibold max-w-[100px] sm:max-w-[140px] truncate">
+                <span className="font-semibold max-w-[120px] sm:max-w-[160px] truncate">
                   {userName}
                 </span>
                 <button
@@ -109,15 +86,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             )}
           </div>
-
-          {/* Telegram Settings quick icon for mobile */}
-          <button
-            onClick={onOpenTelegramModal}
-            className="md:hidden p-2 rounded-xl bg-zinc-900 border border-zinc-700 text-sky-400 hover:bg-zinc-800 transition"
-            title="Telegram Settings"
-          >
-            <Bot className="w-4 h-4" />
-          </button>
         </div>
       </div>
     </header>

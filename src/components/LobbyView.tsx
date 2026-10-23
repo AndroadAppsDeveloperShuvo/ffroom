@@ -21,8 +21,6 @@ interface LobbyViewProps {
   userName: string;
   onUpdateUserName: (name: string) => void;
   onJoinRoom: (roomId: string, hostName?: string, asHost?: boolean) => void;
-  telegramChatId: string;
-  onUpdateChatId: (chatId: string) => void;
   initialRoomId?: string;
 }
 
@@ -30,8 +28,6 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   userName,
   onUpdateUserName,
   onJoinRoom,
-  telegramChatId,
-  onUpdateChatId,
   initialRoomId = '',
 }) => {
   // Generate random 6-character unique ID
@@ -59,21 +55,20 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
     setCreateStatus(null);
     const targetRoomId = createRoomId.trim().toUpperCase();
 
-    // If autoSendTelegram is checked, dispatch to Telegram Bot
+    // If autoSendTelegram is checked, dispatch to Telegram Bot securely via backend
     if (autoSendTelegram) {
       try {
         const tgResult = await sendRoomToTelegramBot({
           roomId: targetRoomId,
           hostName: userName,
-          chatId: telegramChatId,
-          customNote: customNote || 'ফ্রি ফায়ার ডুও ভয়েস রুমে যোগ দিন!',
+          customNote: customNote || 'ফ্রি ফায়ার ডুও রুম তৈরি হয়েছে!',
         });
 
         if (tgResult.success) {
           playSound('telegram');
           setCreateStatus({
             success: true,
-            message: `টেলিগ্রাম চ্যাটে আইডি ও জয়েন লিংক পাঠানো হয়েছে! (মেসেজ #${tgResult.messageId})`,
+            message: 'টেলিগ্রাম বটে ইউনিক রুম আইডি পাঠানো হয়েছে!',
           });
         } else {
           setCreateStatus({
@@ -213,7 +208,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               </div>
 
               {/* Auto send to Telegram Bot toggle */}
-              <div className="p-3.5 rounded-xl bg-zinc-800/60 border border-zinc-700/60 space-y-2">
+              <div className="p-3 rounded-xl bg-zinc-800/60 border border-zinc-700/60">
                 <label className="flex items-center justify-between cursor-pointer">
                   <div className="flex items-center gap-2">
                     <Bot className="w-4 h-4 text-sky-400" />
@@ -228,12 +223,6 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                     className="w-4 h-4 accent-sky-500 rounded cursor-pointer"
                   />
                 </label>
-                {autoSendTelegram && (
-                  <div className="text-[11px] text-zinc-400 flex items-center justify-between pt-1 border-t border-zinc-700/50">
-                    <span>টার্গেট চ্যাট আইডি:</span>
-                    <span className="font-mono text-sky-300">{telegramChatId}</span>
-                  </div>
-                )}
               </div>
 
               {/* Status Message */}
@@ -343,28 +332,6 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               WebRTC P2P Voice
             </span>
           </div>
-        </div>
-      </div>
-
-      {/* Integration Details Footer Card */}
-      <div className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-zinc-400">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
-            <Shield className="w-4 h-4 text-amber-400" />
-          </div>
-          <div>
-            <p className="font-semibold text-zinc-200">
-              Firebase RTDB & Telegram Bot ইন্টিগ্রেশন সক্রিয়
-            </p>
-            <p className="text-[11px] text-zinc-500 font-mono">
-              Database: ffroomsestem-default-rtdb • Bot: 6784439390... • Chat: {telegramChatId}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="px-2.5 py-1 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 text-[11px] font-medium">
-            ● সিস্টেম প্রস্তুত
-          </span>
         </div>
       </div>
     </div>

@@ -35,7 +35,6 @@ interface VoiceRoomViewProps {
   localVolume: number;
   remoteVolume: number;
   callDuration: number;
-  telegramChatId: string;
   errorMessage: string | null;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
@@ -56,7 +55,6 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
   localVolume,
   remoteVolume,
   callDuration,
-  telegramChatId,
   errorMessage,
   onToggleMute,
   onToggleDeafen,
@@ -97,13 +95,12 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
     const result = await sendRoomToTelegramBot({
       roomId,
       hostName: userName,
-      chatId: telegramChatId,
       customNote: partner ? 'রুমটিতে ইতিমধ্যে ১ জন যুক্ত আছে!' : 'ডুও পার্টনারের জন্য অপেক্ষা করা হচ্ছে!',
     });
 
     setIsSendingTelegram(false);
     if (result.success) {
-      setTelegramStatus(`টেলিগ্রাম চ্যাটে আইডি পাঠানো হয়েছে! (মেসেজ #${result.messageId})`);
+      setTelegramStatus('টেলিগ্রাম বটে ইউনিক রুম আইডি পাঠানো হয়েছে!');
     } else {
       setTelegramStatus(`ত্রুটি: ${result.error || 'টেলিগ্রামে পাঠানো যায়নি'}`);
     }
@@ -195,12 +192,9 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
 
         {/* Telegram Feedback Notification */}
         {telegramStatus && (
-          <div className="mt-3 p-2.5 rounded-xl bg-sky-950/40 border border-sky-500/40 text-sky-300 text-xs flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Bot className="w-4 h-4 text-sky-400 shrink-0" />
-              <span>{telegramStatus}</span>
-            </div>
-            <span className="text-[10px] text-sky-400/80">চ্যাট আইডি: {telegramChatId}</span>
+          <div className="mt-3 p-2.5 rounded-xl bg-sky-950/40 border border-sky-500/40 text-sky-300 text-xs flex items-center gap-2">
+            <Bot className="w-4 h-4 text-sky-400 shrink-0" />
+            <span>{telegramStatus}</span>
           </div>
         )}
 

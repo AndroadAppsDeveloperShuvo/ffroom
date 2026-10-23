@@ -3,8 +3,6 @@ import { useVoiceRoom } from './hooks/useVoiceRoom';
 import { Navbar } from './components/Navbar';
 import { LobbyView } from './components/LobbyView';
 import { VoiceRoomView } from './components/VoiceRoomView';
-import { TelegramModal } from './components/TelegramModal';
-import { DEFAULT_TELEGRAM_CHAT_ID } from './lib/telegram';
 
 export default function App() {
   const {
@@ -29,22 +27,7 @@ export default function App() {
     sendMessage,
   } = useVoiceRoom();
 
-  const [telegramChatId, setTelegramChatId] = useState<string>(() => {
-    return localStorage.getItem('ff_telegram_chat_id') || DEFAULT_TELEGRAM_CHAT_ID;
-  });
-
-  const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
   const [urlRoomId, setUrlRoomId] = useState<string>('');
-
-  // Save chat ID preference
-  const handleUpdateChatId = (newId: string) => {
-    const trimmed = newId.trim();
-    if (trimmed) {
-      setTelegramChatId(trimmed);
-      localStorage.setItem('ff_telegram_chat_id', trimmed);
-    }
-  };
-
   const hasAutoJoinedRef = useRef(false);
 
   // Check URL query parameters for direct room joining (from Telegram link click)
@@ -71,8 +54,6 @@ export default function App() {
       <Navbar
         userName={userName}
         onUpdateUserName={updateUserName}
-        onOpenTelegramModal={() => setIsTelegramModalOpen(true)}
-        telegramChatId={telegramChatId}
         connectionStatus={connectionStatus}
       />
 
@@ -92,7 +73,6 @@ export default function App() {
             localVolume={localVolume}
             remoteVolume={remoteVolume}
             callDuration={callDuration}
-            telegramChatId={telegramChatId}
             errorMessage={errorMessage}
             onToggleMute={toggleMute}
             onToggleDeafen={toggleDeafen}
@@ -104,26 +84,14 @@ export default function App() {
             userName={userName}
             onUpdateUserName={updateUserName}
             onJoinRoom={joinRoom}
-            telegramChatId={telegramChatId}
-            onUpdateChatId={handleUpdateChatId}
             initialRoomId={urlRoomId}
           />
         )}
       </main>
 
-      {/* Telegram Configuration Modal */}
-      <TelegramModal
-        isOpen={isTelegramModalOpen}
-        onClose={() => setIsTelegramModalOpen(false)}
-        chatId={telegramChatId}
-        onUpdateChatId={handleUpdateChatId}
-      />
-
       {/* Footer */}
       <footer className="border-t border-zinc-900 py-4 px-6 text-center text-xs text-zinc-600 bg-zinc-950/80">
-        <p>
-          FF Duo Voice Connect • Real-Time WebRTC Audio & Firebase Realtime Database • Telegram Bot API
-        </p>
+        <p>FF Duo Voice Connect • Real-Time WebRTC Audio & Firebase Realtime Database</p>
       </footer>
     </div>
   );
