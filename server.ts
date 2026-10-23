@@ -78,17 +78,17 @@ app.post('/api/telegram/send', async (req: Request, res: Response) => {
       hour12: true,
     });
 
-    const siteUrl = 'https://ffroom.vercel.app/';
+    const joinRoomUrl = `https://ffroom.vercel.app/?room=${encodeURIComponent(roomId.trim().toUpperCase())}`;
 
-    // Clean, direct Room ID notification with "সাইট ওপেন করুন" button
+    // Clean, direct Room ID notification with "রুমে প্রবেশ করুন" button
     const captionText = 
-`🎮 <b>নতুন ডুও ভয়েস রুম তৈরি হয়েছে!</b>
+`🎮 <b>নতুন একাউন্ট ডিল রুম তৈরি হয়েছে!</b>
 ━━━━━━━━━━━━━━━━━━━━
 🆔 <b>রুম আইডি:</b> <code>${roomId}</code>
-👤 <b>হোস্ট:</b> ${hostName}
+👤 <b>সেলার / হোস্ট:</b> ${hostName}
 ⏰ <b>সময়:</b> ${banglaTime}
 ${customNote ? `📝 <b>নোট:</b> ${customNote}\n` : ''}━━━━━━━━━━━━━━━━━━━━
-👉 <b>নিচের বাটনে চাপ দিয়ে সাইটে গিয়ে রুম আইডিটি লিখুন এবং সরাসরি রুমে জয়েন করুন।</b>`;
+👉 <b>নিচের "রুমে প্রবেশ করুন" বাটনে চাপ দিলে সরাসরি রুমে জয়েন হয়ে যাবে।</b>`;
 
     const telegramPayload = {
       chat_id: targetChatId,
@@ -98,8 +98,8 @@ ${customNote ? `📝 <b>নোট:</b> ${customNote}\n` : ''}━━━━━━�
         inline_keyboard: [
           [
             {
-              text: '🌐 সাইট ওপেন করুন',
-              url: siteUrl,
+              text: '🚪 রুমে প্রবেশ করুন',
+              url: joinRoomUrl,
             },
           ],
         ],

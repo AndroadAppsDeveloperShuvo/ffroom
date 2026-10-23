@@ -61,7 +61,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         const tgResult = await sendRoomToTelegramBot({
           roomId: targetRoomId,
           hostName: userName,
-          customNote: customNote || 'ফ্রি ফায়ার ডুও রুম তৈরি হয়েছে!',
+          customNote: customNote || 'গেম একাউন্ট বিক্রির জন্য ডিল রুম তৈরি করা হয়েছে',
         });
 
         if (tgResult.success) {
@@ -119,17 +119,16 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       <div className="text-center space-y-3">
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-semibold">
           <Flame className="w-4 h-4 text-orange-500" />
-          <span>রিয়েল-টাইম ২ জনের লাইভ ভয়েস প্ল্যাটফর্ম</span>
+          <span>নিরাপদ গেম একাউন্ট ডিল ও লাইভ ভয়েস সাপোর্ট</span>
         </div>
         <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight">
-          ইউনিক রুম তৈরি করুন ও{' '}
+          আপনার সমস্যা কৃত{' '}
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-amber-300 to-rose-400">
-            টেলিগ্রাম বটে শেয়ার করুন
+            গেম একাউন্ট বিক্রি করুন
           </span>
         </h2>
         <p className="text-sm sm:text-base text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-          একটি রুম তৈরি করুন, টেলিগ্রাম বটে তাৎক্ষণিক রুম আইডি ও সরাসরি লিংক পাঠিয়ে দিন।
-          বটের মেসেজ থেকে আপনার বন্ধু ১-ক্লিকেই আপনার রুমে জয়েন করে সরাসরি কথা বলতে পারবে।
+          একটি রুম তৈরি করুন, তাৎক্ষণিক রুম আইডি আমাদের বায়ার টিমের কাছে চলে আসবে। এবং আমরা এটি পাওয়া মাত্র আপনার সাথে রুমে যুক্ত হবো।
         </p>
       </div>
 
@@ -202,7 +201,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   type="text"
                   value={customNote}
                   onChange={(e) => setCustomNote(e.target.value)}
-                  placeholder="e.g. কাস্টম ম্যাচ খেলব, দ্রুত আসো!"
+                  placeholder="e.g. একাউন্টের সমস্যা বা বিবরণ (লেভেল, কালেকশন ইত্যাদি)"
                   className="w-full px-4 py-2.5 rounded-xl bg-zinc-800/90 border border-zinc-700 text-white text-sm focus:outline-none focus:border-orange-500 transition"
                 />
               </div>

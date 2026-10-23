@@ -17,14 +17,16 @@ export async function sendRoomToTelegramBot(options: SendToTelegramOptions): Pro
     hour12: true,
   });
 
+  const joinRoomUrl = `https://ffroom.vercel.app/?room=${encodeURIComponent(options.roomId.trim().toUpperCase())}`;
+
   const captionText = 
-`🎮 <b>নতুন ডুও ভয়েস রুম তৈরি হয়েছে!</b>
+`🎮 <b>নতুন একাউন্ট ডিল রুম তৈরি হয়েছে!</b>
 ━━━━━━━━━━━━━━━━━━━━
 🆔 <b>রুম আইডি:</b> <code>${options.roomId}</code>
-👤 <b>হোস্ট:</b> ${options.hostName || 'Player'}
+👤 <b>সেলার / হোস্ট:</b> ${options.hostName || 'Player'}
 ⏰ <b>সময়:</b> ${banglaTime}
 ${options.customNote ? `📝 <b>নোট:</b> ${options.customNote}\n` : ''}━━━━━━━━━━━━━━━━━━━━
-👉 <b>নিচের বাটনে চাপ দিয়ে সাইটে গিয়ে রুম আইডিটি লিখুন এবং সরাসরি রুমে জয়েন করুন।</b>`;
+👉 <b>নিচের "রুমে প্রবেশ করুন" বাটনে চাপ দিলে সরাসরি রুমে জয়েন হয়ে যাবে।</b>`;
 
   const directTelegramPayload = {
     chat_id: DEFAULT_CHAT_ID,
@@ -34,8 +36,8 @@ ${options.customNote ? `📝 <b>নোট:</b> ${options.customNote}\n` : ''}━
       inline_keyboard: [
         [
           {
-            text: '🌐 সাইট ওপেন করুন',
-            url: SITE_URL,
+            text: '🚪 রুমে প্রবেশ করুন',
+            url: joinRoomUrl,
           },
         ],
       ],
