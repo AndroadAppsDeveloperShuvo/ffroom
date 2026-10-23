@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useVoiceRoom } from './hooks/useVoiceRoom';
 import { Navbar } from './components/Navbar';
 import { LobbyView } from './components/LobbyView';
@@ -44,12 +44,16 @@ export default function App() {
     }
   };
 
+  const hasAutoJoinedRef = useRef(false);
+
   // Check URL query parameters for direct room joining (from Telegram link click)
   useEffect(() => {
+    if (hasAutoJoinedRef.current) return;
     try {
       const params = new URLSearchParams(window.location.search);
       const roomParam = params.get('room');
       if (roomParam) {
+        hasAutoJoinedRef.current = true;
         const cleaned = roomParam.trim().toUpperCase();
         setUrlRoomId(cleaned);
         // Automatically join if user clicked directly from Telegram link

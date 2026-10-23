@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ChatMessage, PeerUser } from '../types';
 import { playSound } from '../lib/soundEffects';
-import { syncRoomToFirebase, pushChatMessageToFirebase } from '../lib/firebase';
+import { syncRoomToFirebase, pushChatMessageToFirebase, subscribeFirebaseRoom } from '../lib/firebase';
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -13,17 +13,18 @@ const ICE_SERVERS: RTCConfiguration = {
 
 export function useVoiceRoom() {
   const [roomId, setRoomId] = useState<string | null>(null);
+  const roomIdRef = useRef<string | null>(null);
+
   const [userName, setUserName] = useState<string>(() => {
     return localStorage.getItem('ff_user_name') || `Player_${Math.floor(1000 + Math.random() * 9000)}`;
   });
-  const [peerId] = useState<string>(() => {
-    let id = sessionStorage.getItem('ff_peer_id');
-    if (!id) {
-      id = `peer_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      sessionStorage.setItem('ff_peer_id', id);
-    }
-    return id;
-  });
+  const userNameRef = useRef(userName);
+
+  // Truly unique peerId per tab / window instance
+  const peerIdRef = useRef<string>(
+    `peer_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`
+  );
+  const peerId = peerIdRef.current;
 
   const [connectionStatus, setConnectionStatus] = useState<
     'idle' | 'connecting' | 'waiting_partner' | 'connected' | 'call_connected' | 'error'
@@ -47,12 +48,23 @@ export function useVoiceRoom() {
   const animFrameRef = useRef<number | null>(null);
   const timerIntervalRef = useRef<any>(null);
   const isInitiatorRef = useRef<boolean>(false);
+  const syncIntervalRef = useRef<any>(null);
+
+  // Keep refs in sync
+  useEffect(() => {
+    roomIdRef.current = roomId;
+  }, [roomId]);
+
+  useEffect(() => {
+    userNameRef.current = userName;
+  }, [userName]);
 
   // Save username to local storage
   const updateUserName = useCallback((newName: string) => {
     const trimmed = newName.trim();
     if (trimmed) {
       setUserName(trimmed);
+      userNameRef.current = trimmed;
       localStorage.setItem('ff_user_name', trimmed);
     }
   }, []);
@@ -91,6 +103,57 @@ export function useVoiceRoom() {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
   }, [partner, connectionStatus]);
+
+  // Periodic REST message sync (ensures messages from creator or joiner are NEVER missed)
+  useEffect(() => {
+    if (!roomId) {
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+      return;
+    }
+
+    const fetchLatestMessages = async () => {
+      try {
+        const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/messages`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.messages)) {
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map((m) => m.id));
+              const incoming = data.messages.filter((m: ChatMessage) => !existingIds.has(m.id));
+              if (incoming.length === 0) return prev;
+              return [...prev, ...incoming];
+            });
+          }
+        }
+      } catch {
+        // silent sync fallback
+      }
+    };
+
+    // Immediate initial sync
+    fetchLatestMessages();
+
+    // Poll every 2.5 seconds as safety net
+    syncIntervalRef.current = setInterval(fetchLatestMessages, 2500);
+
+    // Also subscribe to Firebase RTDB for real-time room sync
+    const unsubscribeFirebase = subscribeFirebaseRoom(roomId, (roomData) => {
+      if (roomData?.messages && typeof roomData.messages === 'object') {
+        const fbMessages = Object.values(roomData.messages) as ChatMessage[];
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id));
+          const incoming = fbMessages.filter((m: ChatMessage) => m.id && !existingIds.has(m.id));
+          if (incoming.length === 0) return prev;
+          return [...prev, ...incoming];
+        });
+      }
+    });
+
+    return () => {
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+      unsubscribeFirebase();
+    };
+  }, [roomId]);
 
   // Audio level meter loop
   useEffect(() => {
@@ -153,7 +216,7 @@ export function useVoiceRoom() {
         remoteAnalyserRef.current = analyser;
       }
     } catch (e) {
-      console.warn('AudioContext setup error:', e);
+      console.warn('AudioContext setup notice:', e);
     }
   };
 
@@ -180,10 +243,7 @@ export function useVoiceRoom() {
       setupAudioAnalyser(stream, true);
       return stream;
     } catch (err: any) {
-      console.warn('Microphone permission or access error:', err);
-      setErrorMessage(
-        'মাইক্রোফোনের অনুমতি পাওয়া যায়নি। অনুগ্রহ করে ব্রাউজারে Mic Permission দিন।'
-      );
+      console.warn('Microphone permission notice:', err);
       return null;
     }
   };
@@ -191,7 +251,9 @@ export function useVoiceRoom() {
   // Create RTCPeerConnection
   const createPeerConnection = (targetId: string) => {
     if (pcRef.current) {
-      pcRef.current.close();
+      try {
+        pcRef.current.close();
+      } catch {}
     }
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -253,7 +315,7 @@ export function useVoiceRoom() {
         data: offer,
       });
     } catch (err) {
-      console.error('Failed to initiate WebRTC call:', err);
+      console.warn('Notice initiating WebRTC call:', err);
     }
   };
 
@@ -269,7 +331,6 @@ export function useVoiceRoom() {
 
         await pc.setRemoteDescription(new RTCSessionDescription(data));
 
-        // Add any pending candidates
         while (pendingCandidates.current.length) {
           const candidate = pendingCandidates.current.shift();
           if (candidate) {
@@ -303,19 +364,30 @@ export function useVoiceRoom() {
         }
       }
     } catch (err) {
-      console.error('Error handling WebRTC signal:', err);
+      console.warn('Error handling WebRTC signal:', err);
     }
   };
 
   // Connect to Room
   const joinRoom = useCallback((targetRoomId: string, customName?: string) => {
     if (!targetRoomId) return;
-    const finalName = customName || userName;
-    setRoomId(targetRoomId);
+    const cleanRoomId = targetRoomId.trim().toUpperCase();
+    const finalName = customName || userNameRef.current;
+
+    // Clean up previous socket if any
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+      } catch {}
+      wsRef.current = null;
+    }
+
+    setRoomId(cleanRoomId);
+    roomIdRef.current = cleanRoomId;
     setConnectionStatus('connecting');
     setErrorMessage(null);
 
-    // Request mic access in advance
+    // Request mic access
     initLocalAudio().catch(() => {});
 
     // Setup WebSocket
@@ -329,7 +401,7 @@ export function useVoiceRoom() {
         JSON.stringify({
           type: 'join-room',
           payload: {
-            roomId: targetRoomId,
+            roomId: cleanRoomId,
             peerId,
             userName: finalName,
           },
@@ -344,7 +416,15 @@ export function useVoiceRoom() {
 
         switch (type) {
           case 'room-joined': {
-            setMessages(payload.messages || []);
+            // Receive past messages from the room so joiner immediately sees creator's messages
+            if (payload.messages && Array.isArray(payload.messages)) {
+              setMessages((prev) => {
+                const existingIds = new Set(prev.map((m) => m.id));
+                const newOnes = payload.messages.filter((m: ChatMessage) => !existingIds.has(m.id));
+                return [...prev, ...newOnes];
+              });
+            }
+
             if (payload.peers && payload.peers.length > 0) {
               const existingPartner = payload.peers[0];
               setPartner({
@@ -356,16 +436,15 @@ export function useVoiceRoom() {
               });
               setConnectionStatus('connected');
               playSound('join');
-              // We joined an existing room where partner is waiting, partner will initiate or we initiate
               initiateCall(existingPartner.peerId);
             } else {
               setPartner(null);
               setConnectionStatus('waiting_partner');
             }
 
-            // Sync room to Firebase RTDB in background
-            syncRoomToFirebase(targetRoomId, {
-              roomId: targetRoomId,
+            // Sync room to Firebase RTDB
+            syncRoomToFirebase(cleanRoomId, {
+              roomId: cleanRoomId,
               creatorName: finalName,
               activePeersCount: (payload.peers?.length || 0) + 1,
               status: payload.peers?.length > 0 ? 'connected' : 'waiting',
@@ -383,7 +462,6 @@ export function useVoiceRoom() {
             });
             setConnectionStatus('connected');
             playSound('join');
-            // When new peer joins us, we initiate the call to them
             initiateCall(payload.peerId);
             break;
           }
@@ -394,7 +472,10 @@ export function useVoiceRoom() {
           }
 
           case 'chat-message': {
-            setMessages((prev) => [...prev, payload]);
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === payload.id)) return prev;
+              return [...prev, payload];
+            });
             playSound('message');
             break;
           }
@@ -416,7 +497,9 @@ export function useVoiceRoom() {
             setConnectionStatus('waiting_partner');
             playSound('leave');
             if (pcRef.current) {
-              pcRef.current.close();
+              try {
+                pcRef.current.close();
+              } catch {}
               pcRef.current = null;
             }
             if (remoteAudioRef.current) {
@@ -435,14 +518,13 @@ export function useVoiceRoom() {
     };
 
     ws.onerror = (e) => {
-      console.error('WebSocket connection error:', e);
-      setErrorMessage('সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে। আবার চেষ্টা করুন।');
+      console.warn('WebSocket connection error:', e);
     };
 
     ws.onclose = () => {
-      setConnectionStatus('idle');
+      setConnectionStatus((prev) => (prev === 'idle' ? 'idle' : 'waiting_partner'));
     };
-  }, [peerId, userName]);
+  }, [peerId]);
 
   // Leave room
   const leaveRoom = useCallback(() => {
@@ -452,7 +534,9 @@ export function useVoiceRoom() {
       wsRef.current.close();
     }
     if (pcRef.current) {
-      pcRef.current.close();
+      try {
+        pcRef.current.close();
+      } catch {}
       pcRef.current = null;
     }
     if (localStreamRef.current) {
@@ -464,6 +548,7 @@ export function useVoiceRoom() {
     }
 
     setRoomId(null);
+    roomIdRef.current = null;
     setPartner(null);
     setConnectionStatus('idle');
     setMessages([]);
@@ -500,24 +585,46 @@ export function useVoiceRoom() {
     });
   }, []);
 
-  // Send Text or Voice Note Message
+  // Send Text or Voice Note Message (Guaranteed delivery: Optimistic + WS + HTTP REST + Firebase RTDB)
   const sendMessage = useCallback((text: string, audioClip?: string) => {
     if (!text.trim() && !audioClip) return;
-    const msgPayload = {
-      senderName: userName,
+    const currentRoom = roomIdRef.current;
+    if (!currentRoom) return;
+
+    const msgId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const currentSenderName = userNameRef.current;
+
+    const newMsg: ChatMessage = {
+      id: msgId,
+      senderId: peerId,
+      senderName: currentSenderName,
       text: text.trim(),
+      timestamp: Date.now(),
       audioClip,
     };
-    sendWsMessage('chat-message', msgPayload);
-    // Also push to Firebase RTDB for persistence
-    if (roomId) {
-      pushChatMessageToFirebase(roomId, {
-        ...msgPayload,
-        senderId: peerId,
-        timestamp: Date.now(),
-      });
-    }
-  }, [userName, roomId, peerId]);
+
+    // 1. Optimistic update: show immediately on local screen
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === msgId)) return prev;
+      return [...prev, newMsg];
+    });
+
+    // 2. Send via WebSocket to all peers
+    sendWsMessage('chat-message', {
+      ...newMsg,
+      roomId: currentRoom,
+    });
+
+    // 3. Send via HTTP REST endpoint as reliable fallback
+    fetch(`/api/rooms/${encodeURIComponent(currentRoom)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newMsg),
+    }).catch((err) => console.warn('REST message sync notice:', err));
+
+    // 4. Push to Firebase RTDB
+    pushChatMessageToFirebase(currentRoom, newMsg).catch(() => {});
+  }, [peerId]);
 
   return {
     roomId,

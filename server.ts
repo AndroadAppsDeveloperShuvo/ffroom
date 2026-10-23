@@ -191,7 +191,8 @@ ${customNote ? `📝 <b>নোট:</b> ${customNote}\n` : ''}
 // Get room details
 app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = rooms.get(roomId);
+  const cleanRoomId = (roomId || '').trim().toUpperCase();
+  const room = rooms.get(cleanRoomId);
   if (!room) {
     return res.json({ exists: false, count: 0, peers: [] });
   }
@@ -212,6 +213,63 @@ app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
   });
 });
 
+// Get room messages via REST
+app.get('/api/rooms/:roomId/messages', (req: Request, res: Response) => {
+  const { roomId } = req.params;
+  const cleanRoomId = (roomId || '').trim().toUpperCase();
+  const room = rooms.get(cleanRoomId);
+  res.json({
+    success: true,
+    roomId: cleanRoomId,
+    messages: room ? room.messages : [],
+  });
+});
+
+// Post message to room via REST (reliable fallback and instant sync)
+app.post('/api/rooms/:roomId/messages', (req: Request, res: Response) => {
+  const { roomId } = req.params;
+  const cleanRoomId = (roomId || '').trim().toUpperCase();
+  if (!cleanRoomId) {
+    return res.status(400).json({ success: false, error: 'Room ID required' });
+  }
+
+  const room = getOrCreateRoom(cleanRoomId);
+  const { senderId, senderName, text, audioClip, id } = req.body;
+
+  if (!text && !audioClip) {
+    return res.status(400).json({ success: false, error: 'Empty message' });
+  }
+
+  const chatMsg = {
+    id: id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    senderId: senderId || 'anonymous',
+    senderName: senderName || 'Player',
+    text: text || '',
+    timestamp: Date.now(),
+    audioClip,
+  };
+
+  // Add message if not exists
+  if (!room.messages.some(m => m.id === chatMsg.id)) {
+    room.messages.push(chatMsg);
+    if (room.messages.length > 100) room.messages.shift();
+  }
+
+  // Broadcast to all active websockets in this room
+  const broadcastData = JSON.stringify({
+    type: 'chat-message',
+    payload: chatMsg,
+  });
+
+  room.peers.forEach(peer => {
+    if (peer.ws.readyState === WebSocket.OPEN) {
+      peer.ws.send(broadcastData);
+    }
+  });
+
+  res.json({ success: true, message: chatMsg });
+});
+
 // Set up WebSocket Server
 const wss = new WebSocketServer({ server, path: '/ws' });
 
@@ -227,23 +285,24 @@ wss.on('connection', (ws: WebSocket) => {
       switch (type) {
         case 'join-room': {
           const { roomId, peerId, userName = 'Guest' } = payload;
-          currentRoomId = roomId;
+          const cleanRoomId = (roomId || '').trim().toUpperCase();
+          currentRoomId = cleanRoomId;
           currentPeerId = peerId;
 
-          const room = getOrCreateRoom(roomId);
+          const room = getOrCreateRoom(cleanRoomId);
 
           // Register or update peer
           const peerConn: PeerConnection = {
             ws,
             peerId,
             userName,
-            roomId,
+            roomId: cleanRoomId,
             isMuted: false,
             joinedAt: Date.now(),
           };
           room.peers.set(peerId, peerConn);
 
-          // Inform this peer of the current room status and existing peers
+          // Inform this peer of the current room status, messages, and existing peers
           const otherPeers = Array.from(room.peers.values())
             .filter(p => p.peerId !== peerId)
             .map(p => ({
@@ -256,7 +315,7 @@ wss.on('connection', (ws: WebSocket) => {
             JSON.stringify({
               type: 'room-joined',
               payload: {
-                roomId,
+                roomId: cleanRoomId,
                 peerId,
                 totalPeers: room.peers.size,
                 peers: otherPeers,
@@ -326,21 +385,24 @@ wss.on('connection', (ws: WebSocket) => {
         }
 
         case 'chat-message': {
-          if (!currentRoomId || !currentPeerId) return;
-          const room = rooms.get(currentRoomId);
-          if (!room) return;
+          const targetRoomId = (payload.roomId || currentRoomId || '').trim().toUpperCase();
+          const targetPeerId = payload.senderId || currentPeerId;
+          if (!targetRoomId) return;
+          const room = getOrCreateRoom(targetRoomId);
 
           const chatMsg = {
-            id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            senderId: currentPeerId,
-            senderName: payload.senderName || 'Anonymous',
+            id: payload.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            senderId: targetPeerId || 'anonymous',
+            senderName: payload.senderName || 'Player',
             text: payload.text || '',
-            timestamp: Date.now(),
+            timestamp: payload.timestamp || Date.now(),
             audioClip: payload.audioClip,
           };
 
-          room.messages.push(chatMsg);
-          if (room.messages.length > 100) room.messages.shift();
+          if (!room.messages.some(m => m.id === chatMsg.id)) {
+            room.messages.push(chatMsg);
+            if (room.messages.length > 100) room.messages.shift();
+          }
 
           // Broadcast chat to all peers in the room
           const broadcastData = JSON.stringify({
@@ -403,6 +465,12 @@ wss.on('connection', (ws: WebSocket) => {
     if (!currentRoomId || !currentPeerId) return;
     const room = rooms.get(currentRoomId);
     if (!room) return;
+
+    // Check if another socket has already taken this peer ID (reconnect)
+    const existing = room.peers.get(currentPeerId);
+    if (existing && existing.ws !== ws) {
+      return;
+    }
 
     room.peers.delete(currentPeerId);
 
