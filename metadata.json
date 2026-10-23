@@ -1,0 +1,8 @@
+{
+  "name": "FF Duo Voice & Room Connect",
+  "description": "Create unique voice rooms, share instantly to Telegram bot, and talk with your duo partner in real-time with WebRTC and Firebase.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
