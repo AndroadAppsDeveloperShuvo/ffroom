@@ -14,16 +14,9 @@ export default function App() {
     partner,
     connectionStatus,
     messages,
-    isMuted,
-    isDeafened,
-    localVolume,
-    remoteVolume,
-    callDuration,
     errorMessage,
     joinRoom,
     leaveRoom,
-    toggleMute,
-    toggleDeafen,
     sendMessage,
   } = useVoiceRoom();
 
@@ -58,7 +51,7 @@ export default function App() {
       />
 
       {/* Main View Area */}
-      <main className="flex-1 flex flex-col">
+      <main className="flex-1 flex flex-col w-full max-w-full overflow-x-hidden">
         {roomId ? (
           <VoiceRoomView
             roomId={roomId}
@@ -68,14 +61,7 @@ export default function App() {
             partner={partner}
             connectionStatus={connectionStatus}
             messages={messages}
-            isMuted={isMuted}
-            isDeafened={isDeafened}
-            localVolume={localVolume}
-            remoteVolume={remoteVolume}
-            callDuration={callDuration}
             errorMessage={errorMessage}
-            onToggleMute={toggleMute}
-            onToggleDeafen={toggleDeafen}
             onSendMessage={sendMessage}
             onLeaveRoom={leaveRoom}
           />

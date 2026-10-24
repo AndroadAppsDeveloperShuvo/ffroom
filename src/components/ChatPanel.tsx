@@ -524,15 +524,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       />
 
       {/* Header */}
-      <div className="px-4 py-3 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="w-4 h-4 text-orange-400" />
-          <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
-            রিয়েল-টাইম লাইভ চ্যাট ও ফিল্টার ভয়েস
+      <div className="px-3 sm:px-4 py-2.5 bg-zinc-900/95 border-b border-zinc-800 flex items-center justify-between gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <MessageSquare className="w-4 h-4 text-orange-400 shrink-0" />
+          <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wide truncate">
+            লাইভ চ্যাট ও ভয়েস
           </h4>
         </div>
-        <span className="text-[11px] text-zinc-500 font-mono">
-          {messages.length} টি বার্তা
+        <span className="text-[11px] text-zinc-400 font-mono shrink-0 bg-zinc-800/80 px-2.5 py-0.5 rounded-full border border-zinc-700/50">
+          {messages.length} বার্তা
         </span>
       </div>
 
@@ -670,15 +670,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       )}
 
       {/* Bottom Input Bar */}
-      <div className="p-3 bg-zinc-900 border-t border-zinc-800">
-        <form onSubmit={handleSend} className="flex items-center gap-2">
+      <div className="p-2 sm:p-3 bg-zinc-900 border-t border-zinc-800">
+        <form onSubmit={handleSend} className="flex items-center gap-1.5 sm:gap-2">
           {/* Gallery Image Upload Button */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={isCompressing}
-            title="গ্যালারি থেকে ছবি বা স্ক্রিনশট শেয়ার করুন"
-            className={`p-2.5 rounded-xl border transition flex items-center justify-center cursor-pointer ${
+            title="গ্যালারি থেকে ছবি শেয়ার করুন"
+            className={`p-2 sm:p-2.5 rounded-xl border transition flex items-center justify-center shrink-0 cursor-pointer ${
               selectedImage
                 ? 'bg-orange-500/20 text-orange-400 border-orange-500/50'
                 : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-orange-400 border-zinc-700/60'
@@ -695,11 +695,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           <button
             type="button"
             onClick={handleOpenVoiceModal}
-            title="ফিল্টার বেছে ভয়েস নোট পাঠান"
-            className="p-2.5 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-orange-400 border border-orange-500/40 transition cursor-pointer flex items-center gap-1.5 active:scale-95 shadow-sm"
+            title="ফিল্টার বেছে ভয়েস পাঠান"
+            className="p-2 sm:p-2.5 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-orange-400 border border-orange-500/40 transition shrink-0 cursor-pointer flex items-center gap-1 active:scale-95 shadow-sm"
           >
             <Mic className="w-4 h-4" />
-            <span className="text-[11px] font-semibold hidden sm:inline">ভয়েস ফিল্টার</span>
+            <span className="text-[11px] font-semibold hidden md:inline">ভয়েস ফিল্টার</span>
           </button>
 
           <input
@@ -707,15 +707,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             placeholder={
-              selectedImage ? 'ছবির সাথে ক্যাপশন লিখুন (ঐচ্ছিক)...' : 'মেসেজ লিখুন...'
+              selectedImage ? 'ছবির ক্যাপশন...' : 'মেসেজ লিখুন...'
             }
-            className="flex-1 bg-zinc-800/90 border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 transition"
+            className="flex-1 min-w-0 bg-zinc-800/90 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 transition"
           />
 
           <button
             type="submit"
             disabled={!inputText.trim() && !selectedImage}
-            className="p-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition shadow-md shadow-orange-500/20 cursor-pointer"
+            className="p-2 sm:p-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition shadow-md shadow-orange-500/20 shrink-0 cursor-pointer"
           >
             <Send className="w-4 h-4" />
           </button>
@@ -724,7 +724,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
       {/* Voice Filter & Recording Drawer (Choose filter FIRST, then record & send) */}
       {isVoiceModalOpen && (
-        <div className="absolute inset-x-0 bottom-0 z-30 bg-zinc-950/98 backdrop-blur-md border-t-2 border-orange-500/60 p-4 rounded-t-3xl shadow-2xl space-y-4 animate-in slide-in-from-bottom duration-250">
+        <div className="absolute inset-x-0 bottom-0 z-30 bg-zinc-950/98 backdrop-blur-md border-t-2 border-orange-500/60 p-3.5 sm:p-4 rounded-t-3xl shadow-2xl space-y-3 sm:space-y-4 animate-in slide-in-from-bottom duration-250 max-h-[92%] overflow-y-auto">
           {/* Header */}
           <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
             <div className="flex items-center gap-2">
