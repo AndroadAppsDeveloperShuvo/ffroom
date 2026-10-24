@@ -12,8 +12,17 @@ import {
   Loader2,
   Play,
   Pause,
+  RotateCcw,
+  Wand2,
+  Radio,
 } from 'lucide-react';
 import { ChatMessage } from '../types';
+import {
+  VOICE_FILTERS,
+  VoiceFilterType,
+  PcmVoiceRecorder,
+  applyFilterToPcmSamples,
+} from '../lib/voiceFilters';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -22,7 +31,7 @@ interface ChatPanelProps {
 }
 
 const QUICK_PHRASES = [
-  'Ready Duo! 🔥',
+  'আইডির সমস্যা কি 😒',
   'কালেকশন ছবি দিন 📸',
   'লেভেল কত? 🎮',
   'আইডি কোড দিন 🆔',
@@ -30,7 +39,7 @@ const QUICK_PHRASES = [
   'ডিল কনফার্ম! 🤝',
 ];
 
-// Sleek Custom Voice Note Player (Universal iOS Safari & Android WebM/MP4 support)
+// Sleek Custom Voice Note Player (Universal iOS Safari & Android WebM/WAV/MP4 support)
 interface VoiceNotePlayerProps {
   src: string;
   isMe: boolean;
@@ -42,10 +51,6 @@ const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ src, isMe }) => {
   const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Auto-repair for iOS Safari:
-  // If user is on an Apple device (iPhone/iPad/Safari) and the audio base64 begins with audio/webm,
-  // the raw recorded bytes were actually AAC/MP4 that was wrongly labeled as webm.
-  // Rewriting the data URL MIME prefix allows iOS Safari's native media engine to decode and play smoothly.
   const resolvedSrc = useMemo(() => {
     if (!src) return '';
     const isApple =
@@ -84,7 +89,6 @@ const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ src, isMe }) => {
     };
 
     const handleError = () => {
-      // If error occurs with rewritten src, try fallback to original
       if (resolvedSrc !== src) {
         audio.src = src;
       }
@@ -119,7 +123,6 @@ const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ src, isMe }) => {
         setIsPlaying(true);
       } catch (err) {
         console.warn('Audio play notice:', err);
-        // If play failed on Safari due to webm container, try mp4 swap
         if (audio.src.includes('audio/webm')) {
           audio.src = audio.src.replace('audio/webm', 'audio/mp4');
           try {
@@ -148,8 +151,6 @@ const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ src, isMe }) => {
   };
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
-
-  // 16 stylized soundwave bars
   const WAVE_BARS = [35, 65, 90, 45, 80, 100, 60, 85, 50, 95, 70, 40, 85, 60, 45, 75];
 
   return (
@@ -158,7 +159,6 @@ const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ src, isMe }) => {
         isMe ? 'border-white/20' : 'border-zinc-700/60'
       }`}
     >
-      {/* Play/Pause Button */}
       <button
         type="button"
         onClick={togglePlay}
@@ -176,12 +176,10 @@ const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ src, isMe }) => {
         )}
       </button>
 
-      {/* Waveform Scrubber */}
       <div
         className="flex-1 flex flex-col justify-center gap-1.5 cursor-pointer"
         onClick={handleSeek}
       >
-        {/* Animated Waveform bars */}
         <div className="flex items-center gap-[2.5px] h-6 py-1">
           {WAVE_BARS.map((heightPercent, idx) => {
             const barFraction = idx / WAVE_BARS.length;
@@ -204,7 +202,6 @@ const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ src, isMe }) => {
           })}
         </div>
 
-        {/* Time label */}
         <div className="flex items-center justify-between text-[10px] font-mono leading-none">
           <span className={isMe ? 'text-white/90' : 'text-zinc-400'}>
             {formatSecs(currentTime)}
@@ -224,19 +221,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onSendMessage,
 }) => {
   const [inputText, setInputText] = useState('');
-  const [isRecordingNote, setIsRecordingNote] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
 
-  // Gallery image selection & compression states
+  // Voice Filter & Recorder Modal States
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState<VoiceFilterType>('normal');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+
+  // Raw recorded PCM buffer in memory (ensures real duration > 0s)
+  const [recordedRaw, setRecordedRaw] = useState<{
+    samples: Float32Array;
+    sampleRate: number;
+    duration: number;
+  } | null>(null);
+
+  // Processed audio for preview
+  const [processedAudio, setProcessedAudio] = useState<{
+    dataUrl: string;
+    duration: number;
+  } | null>(null);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+
+  // Gallery image selection states
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState<{ url: string; sender: string; time: number } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const pcmRecorderRef = useRef<PcmVoiceRecorder | null>(null);
   const recordIntervalRef = useRef<any>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -247,13 +262,49 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setFullscreenImage(null);
+        if (!isRecording) setIsVoiceModalOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isRecording]);
+
+  // Whenever raw samples or selected filter changes, apply filter and generate WAV data URL
+  useEffect(() => {
+    if (!recordedRaw || recordedRaw.samples.length === 0) {
+      setProcessedAudio(null);
+      return;
+    }
+
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      setIsPreviewPlaying(false);
+    }
+
+    try {
+      const result = applyFilterToPcmSamples(
+        recordedRaw.samples,
+        recordedRaw.sampleRate,
+        selectedFilter
+      );
+      setProcessedAudio(result);
+    } catch (e) {
+      console.warn('Filter processing notice:', e);
+    }
+  }, [recordedRaw, selectedFilter]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (recordIntervalRef.current) clearInterval(recordIntervalRef.current);
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current.src = '';
+      }
+    };
   }, []);
 
-  // Compress image on client via Canvas to ensure fast real-time transfer
+  // Compress image on client via Canvas
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -283,7 +334,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           }
 
           ctx.drawImage(img, 0, 0, width, height);
-          // Compress to JPEG with 0.72 quality (~40-80KB)
           const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.72);
           resolve(compressedDataUrl);
         };
@@ -316,10 +366,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   };
 
-  const handleRemoveSelectedImage = () => {
-    setSelectedImage(null);
-  };
-
   const handleSend = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const trimmed = inputText.trim();
@@ -336,85 +382,119 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     onSendMessage(phrase);
   };
 
-  // Start voice note recording with universal cross-platform MIME detection
-  const startRecordingVoiceNote = async () => {
+  // Open Voice Modal so user can choose filter FIRST
+  const handleOpenVoiceModal = () => {
+    setIsVoiceModalOpen(true);
+    setRecordedRaw(null);
+    setProcessedAudio(null);
+    setIsRecording(false);
+    setRecordSeconds(0);
+  };
+
+  const handleCloseVoiceModal = () => {
+    if (isRecording) {
+      stopRecording();
+    }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      setIsPreviewPlaying(false);
+    }
+    setIsVoiceModalOpen(false);
+    setRecordedRaw(null);
+    setProcessedAudio(null);
+  };
+
+  // Start recording raw PCM audio in memory
+  const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      // Detect best supported MIME type on user's device
-      // iOS Safari requires audio/mp4 or audio/aac. Chrome/Android prefer audio/webm.
-      let mimeType = '';
-      if (typeof MediaRecorder !== 'undefined') {
-        const candidates = [
-          'audio/mp4;codecs=mp4a.40.2',
-          'audio/mp4',
-          'audio/aac',
-          'audio/webm;codecs=opus',
-          'audio/webm',
-        ];
-        for (const candidate of candidates) {
-          if (MediaRecorder.isTypeSupported(candidate)) {
-            mimeType = candidate;
-            break;
-          }
-        }
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        setIsPreviewPlaying(false);
       }
+      setRecordedRaw(null);
+      setProcessedAudio(null);
 
-      const recorderOptions: MediaRecorderOptions = mimeType ? { mimeType } : {};
-      const mediaRecorder = new MediaRecorder(stream, recorderOptions);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
+      const recorder = new PcmVoiceRecorder();
+      await recorder.start();
+      pcmRecorderRef.current = recorder;
 
-      const actualMimeType = mediaRecorder.mimeType || mimeType || 'audio/mp4';
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = () => {
-          let base64Audio = reader.result as string;
-          // Ensure correct MIME header
-          if (
-            base64Audio.startsWith('data:;base64,') ||
-            base64Audio.startsWith('data:application/octet-stream;base64,')
-          ) {
-            base64Audio = base64Audio.replace(/^data:[^;]*;base64,/, `data:${actualMimeType};base64,`);
-          }
-          onSendMessage('🎤 [ভয়েস নোট]', base64Audio);
-        };
-        stream.getTracks().forEach((track) => track.stop());
-      };
-
-      mediaRecorder.start(250);
-      setIsRecordingNote(true);
-      setRecordingDuration(0);
+      setIsRecording(true);
+      setRecordSeconds(0);
 
       recordIntervalRef.current = setInterval(() => {
-        setRecordingDuration((prev) => {
+        setRecordSeconds((prev) => {
           if (prev >= 30) {
-            stopRecordingVoiceNote();
+            stopRecording();
             return 30;
           }
           return prev + 1;
         });
       }, 1000);
-    } catch (e) {
-      console.warn('Cannot record voice clip:', e);
+    } catch (err) {
+      console.warn('Microphone permission / access error:', err);
+      alert('মাইক্রোফোন চালু করার অনুমতি দিন।');
     }
   };
 
-  const stopRecordingVoiceNote = () => {
-    if (mediaRecorderRef.current && isRecordingNote) {
-      mediaRecorderRef.current.stop();
-      setIsRecordingNote(false);
-      if (recordIntervalRef.current) clearInterval(recordIntervalRef.current);
+  // Stop recording and retrieve actual PCM samples
+  const stopRecording = () => {
+    if (recordIntervalRef.current) {
+      clearInterval(recordIntervalRef.current);
+      recordIntervalRef.current = null;
     }
+
+    if (pcmRecorderRef.current && isRecording) {
+      const result = pcmRecorderRef.current.stop();
+      pcmRecorderRef.current = null;
+      setIsRecording(false);
+
+      if (result.samples.length > 0) {
+        setRecordedRaw(result);
+      }
+    }
+  };
+
+  // Toggle preview of the filtered voice note
+  const handleTogglePreview = () => {
+    if (!processedAudio || !processedAudio.dataUrl) return;
+
+    if (previewAudioRef.current && isPreviewPlaying) {
+      previewAudioRef.current.pause();
+      setIsPreviewPlaying(false);
+      return;
+    }
+
+    const audio = new Audio(processedAudio.dataUrl);
+    previewAudioRef.current = audio;
+    audio.onended = () => setIsPreviewPlaying(false);
+    audio.onerror = () => setIsPreviewPlaying(false);
+
+    audio
+      .play()
+      .then(() => setIsPreviewPlaying(true))
+      .catch((err) => {
+        console.warn('Preview play notice:', err);
+        setIsPreviewPlaying(false);
+      });
+  };
+
+  // Send the filtered voice note
+  const handleSendVoiceNote = () => {
+    if (!processedAudio || !processedAudio.dataUrl) return;
+
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      setIsPreviewPlaying(false);
+    }
+
+    const filterObj = VOICE_FILTERS.find((f) => f.id === selectedFilter);
+    const label =
+      selectedFilter === 'normal'
+        ? '🎤 [ভয়েস নোট]'
+        : `🎤 [ভয়েস নোট • ${filterObj?.emoji || ''} ${filterObj?.label || ''}]`;
+
+    onSendMessage(label, processedAudio.dataUrl);
+    handleCloseVoiceModal();
   };
 
   const downloadImage = (url: string, filename: string) => {
@@ -424,6 +504,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const formatSeconds = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -442,7 +528,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         <div className="flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-orange-400" />
           <h4 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">
-            রিয়েল-টাইম লাইভ চ্যাট ও ছবি
+            রিয়েল-টাইম লাইভ চ্যাট ও ফিল্টার ভয়েস
           </h4>
         </div>
         <span className="text-[11px] text-zinc-500 font-mono">
@@ -455,9 +541,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-500">
             <Sparkles className="w-8 h-8 text-zinc-600 mb-2 stroke-[1.5]" />
-            <p className="text-xs text-zinc-400 font-medium">এখনো কোনো মেসেজ বা ছবি আসেনি</p>
+            <p className="text-xs text-zinc-400 font-medium">এখনো কোনো মেসেজ আসেনি</p>
             <p className="text-[11px] text-zinc-600 mt-1 max-w-xs">
-              কথা বলার পাশাপাশি এখানে টেক্সট, ভয়েস নোট এবং গ্যালারি থেকে একাউন্টের ছবি/স্ক্রিনশট শেয়ার করতে পারেন
+              কথা বলার পাশাপাশি টেক্সট, ফিল্টার করা ভয়েস নোট এবং গ্যালারি থেকে একাউন্টের ছবি শেয়ার করুন
             </p>
           </div>
         ) : (
@@ -574,7 +660,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           </div>
           <button
             type="button"
-            onClick={handleRemoveSelectedImage}
+            onClick={() => setSelectedImage(null)}
             className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition cursor-pointer"
             title="ছবি বাতিল করুন"
           >
@@ -583,79 +669,217 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
       )}
 
-      {/* Input bar */}
+      {/* Bottom Input Bar */}
       <div className="p-3 bg-zinc-900 border-t border-zinc-800">
-        {isRecordingNote ? (
-          <div className="flex items-center justify-between p-2 rounded-xl bg-red-950/40 border border-red-500/50 text-red-300 animate-pulse">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
-              <span>ভয়েস নোট রেকর্ড হচ্ছে... ({recordingDuration}s)</span>
+        <form onSubmit={handleSend} className="flex items-center gap-2">
+          {/* Gallery Image Upload Button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isCompressing}
+            title="গ্যালারি থেকে ছবি বা স্ক্রিনশট শেয়ার করুন"
+            className={`p-2.5 rounded-xl border transition flex items-center justify-center cursor-pointer ${
+              selectedImage
+                ? 'bg-orange-500/20 text-orange-400 border-orange-500/50'
+                : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-orange-400 border-zinc-700/60'
+            }`}
+          >
+            {isCompressing ? (
+              <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
+            ) : (
+              <ImageIcon className="w-4 h-4" />
+            )}
+          </button>
+
+          {/* Voice Filter & Recording trigger button */}
+          <button
+            type="button"
+            onClick={handleOpenVoiceModal}
+            title="ফিল্টার বেছে ভয়েস নোট পাঠান"
+            className="p-2.5 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-orange-400 border border-orange-500/40 transition cursor-pointer flex items-center gap-1.5 active:scale-95 shadow-sm"
+          >
+            <Mic className="w-4 h-4" />
+            <span className="text-[11px] font-semibold hidden sm:inline">ভয়েস ফিল্টার</span>
+          </button>
+
+          <input
+            type="text"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            placeholder={
+              selectedImage ? 'ছবির সাথে ক্যাপশন লিখুন (ঐচ্ছিক)...' : 'মেসেজ লিখুন...'
+            }
+            className="flex-1 bg-zinc-800/90 border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 transition"
+          />
+
+          <button
+            type="submit"
+            disabled={!inputText.trim() && !selectedImage}
+            className="p-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition shadow-md shadow-orange-500/20 cursor-pointer"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </form>
+      </div>
+
+      {/* Voice Filter & Recording Drawer (Choose filter FIRST, then record & send) */}
+      {isVoiceModalOpen && (
+        <div className="absolute inset-x-0 bottom-0 z-30 bg-zinc-950/98 backdrop-blur-md border-t-2 border-orange-500/60 p-4 rounded-t-3xl shadow-2xl space-y-4 animate-in slide-in-from-bottom duration-250">
+          {/* Header */}
+          <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-orange-500/20 border border-orange-500/40 flex items-center justify-center text-orange-400">
+                <Wand2 className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-white">ভয়েস ফিল্টার ও রেকর্ডার</h4>
+                <p className="text-[10px] text-zinc-400">ফিল্টার বেছে রেকর্ড করুন ও পাঠান</p>
+              </div>
             </div>
             <button
               type="button"
-              onClick={stopRecordingVoiceNote}
-              className="flex items-center gap-1 px-3 py-1 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 transition cursor-pointer"
+              onClick={handleCloseVoiceModal}
+              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition cursor-pointer"
+              title="বন্ধ করুন"
             >
-              <Square className="w-3 h-3 fill-white" />
-              পাঠান
+              <X className="w-4 h-4" />
             </button>
           </div>
-        ) : (
-          <form onSubmit={handleSend} className="flex items-center gap-2">
-            {/* Gallery Image Upload Button */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isCompressing}
-              title="গ্যালারি থেকে ছবি বা স্ক্রিনশট শেয়ার করুন"
-              className={`p-2.5 rounded-xl border transition flex items-center justify-center cursor-pointer ${
-                selectedImage
-                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/50'
-                  : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-orange-400 border-zinc-700/60'
-              }`}
-            >
-              {isCompressing ? (
-                <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
-              ) : (
-                <ImageIcon className="w-4 h-4" />
-              )}
-            </button>
 
-            {/* Voice Note Record Button */}
-            <button
-              type="button"
-              onClick={startRecordingVoiceNote}
-              title="ভয়েস নোট রেকর্ড করুন"
-              className="p-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-orange-400 border border-zinc-700/60 transition cursor-pointer"
-            >
-              <Mic className="w-4 h-4" />
-            </button>
+          {/* STEP 1: Choose Filter First */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-semibold text-zinc-300">১. ফিল্টার বেছে নিন:</span>
+              <span className="text-orange-400 font-medium">
+                {VOICE_FILTERS.find((f) => f.id === selectedFilter)?.emoji}{' '}
+                {VOICE_FILTERS.find((f) => f.id === selectedFilter)?.label}
+              </span>
+            </div>
 
-            <input
-              type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder={
-                selectedImage ? 'ছবির সাথে ক্যাপশন লিখুন (ঐচ্ছিক)...' : 'মেসেজ লিখুন...'
-              }
-              className="flex-1 bg-zinc-800/90 border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 transition"
-            />
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+              {VOICE_FILTERS.map((f) => {
+                const isSelected = selectedFilter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setSelectedFilter(f.id)}
+                    className={`p-2 rounded-xl text-center border transition flex flex-col items-center gap-0.5 cursor-pointer ${
+                      isSelected
+                        ? 'bg-gradient-to-b from-orange-500/25 to-amber-500/10 border-orange-500 text-white shadow-sm ring-2 ring-orange-500/40'
+                        : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span className="text-lg">{f.emoji}</span>
+                    <span className="text-[10px] font-semibold truncate w-full">{f.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-            <button
-              type="submit"
-              disabled={!inputText.trim() && !selectedImage}
-              className="p-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition shadow-md shadow-orange-500/20 cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
-        )}
-      </div>
+          {/* STEP 2: Record Voice (or Preview after recording) */}
+          <div className="pt-2 border-t border-zinc-800 flex flex-col items-center justify-center gap-3">
+            {!recordedRaw ? (
+              // Recording Controls
+              <div className="flex flex-col items-center gap-2.5 w-full">
+                {isRecording ? (
+                  <div className="flex flex-col items-center gap-3 w-full py-1">
+                    <div className="flex items-center gap-2 text-xs text-red-400 font-mono font-bold animate-pulse">
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+                      <span>রেকর্ড হচ্ছে: {formatSeconds(recordSeconds)} / 0:30</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={stopRecording}
+                      className="w-full sm:w-auto px-6 py-2.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-red-600/30 transition active:scale-95 cursor-pointer"
+                    >
+                      <Square className="w-4 h-4 fill-white" />
+                      <span>রেকর্ডিং থামান (Stop)</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2 w-full py-1">
+                    <p className="text-[11px] text-zinc-400">
+                      উপরের ফিল্টার সিলেক্ট করে নিচের বাটনে চাপ দিয়ে কথা বলুন
+                    </p>
+                    <button
+                      type="button"
+                      onClick={startRecording}
+                      className="w-full sm:w-auto px-6 py-2.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-orange-500/30 transition active:scale-95 cursor-pointer"
+                    >
+                      <Mic className="w-4 h-4" />
+                      <span>রেকর্ড শুরু করুন</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              // Preview & Send after recording
+              <div className="w-full space-y-3">
+                <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs">
+                  <div className="flex items-center gap-2 text-zinc-300">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                    <span>রেকর্ড সম্পন্ন:</span>
+                    <span className="font-mono text-white font-bold">
+                      {formatSeconds(processedAudio?.duration || recordedRaw.duration)}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleTogglePreview}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-orange-400 font-semibold text-xs border border-zinc-700 transition cursor-pointer active:scale-95"
+                  >
+                    {isPreviewPlaying ? (
+                      <>
+                        <Pause className="w-3.5 h-3.5 fill-current" />
+                        <span>বিরতি</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        <span>শুনুন (Preview)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecordedRaw(null);
+                      setProcessedAudio(null);
+                      setIsPreviewPlaying(false);
+                      startRecording();
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold border border-zinc-700 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>আবার রেকর্ড করুন</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSendVoiceNote}
+                    disabled={!processedAudio}
+                    className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 via-amber-500 to-rose-500 hover:brightness-110 text-white text-xs font-bold shadow-lg shadow-orange-500/25 transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>ফিল্টার সহ পাঠান</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Fullscreen Image Lightbox Modal */}
       {fullscreenImage && (
         <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col p-4 animate-in fade-in duration-200">
-          {/* Lightbox Header */}
           <div className="flex items-center justify-between text-white pb-3 max-w-5xl mx-auto w-full">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold">{fullscreenImage.sender}</span>
@@ -686,7 +910,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             </div>
           </div>
 
-          {/* Fullscreen Image Container */}
           <div
             className="flex-1 flex items-center justify-center overflow-auto max-w-5xl mx-auto w-full cursor-zoom-out"
             onClick={() => setFullscreenImage(null)}
