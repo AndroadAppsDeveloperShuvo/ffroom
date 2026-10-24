@@ -14,7 +14,8 @@ const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Telegram Bot Details provided by user
 const DEFAULT_TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '6784439390:AAG7Kxh2F04J-3HAmFEwErDxPo84qXe0L9s';
@@ -40,6 +41,7 @@ interface RoomState {
     text: string;
     timestamp: number;
     audioClip?: string;
+    imageUrl?: string;
   }>;
 }
 
@@ -180,9 +182,9 @@ app.post('/api/rooms/:roomId/messages', (req: Request, res: Response) => {
   }
 
   const room = getOrCreateRoom(cleanRoomId);
-  const { senderId, senderName, text, audioClip, id } = req.body;
+  const { senderId, senderName, text, audioClip, imageUrl, id } = req.body;
 
-  if (!text && !audioClip) {
+  if (!text && !audioClip && !imageUrl) {
     return res.status(400).json({ success: false, error: 'Empty message' });
   }
 
@@ -192,7 +194,8 @@ app.post('/api/rooms/:roomId/messages', (req: Request, res: Response) => {
     senderName: senderName || 'Player',
     text: text || '',
     timestamp: Date.now(),
-    audioClip,
+    ...(audioClip ? { audioClip } : {}),
+    ...(imageUrl ? { imageUrl } : {}),
   };
 
   // Add message if not exists

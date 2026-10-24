@@ -38,7 +38,7 @@ interface VoiceRoomViewProps {
   errorMessage: string | null;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
-  onSendMessage: (text: string, audioClip?: string) => void;
+  onSendMessage: (text: string, audioClip?: string, imageUrl?: string) => void;
   onLeaveRoom: () => void;
 }
 

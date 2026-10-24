@@ -24,6 +24,7 @@ export interface ChatMessage {
   text: string;
   timestamp: number;
   audioClip?: string; // base64 recorded audio note
+  imageUrl?: string; // base64 compressed gallery image
 }
 
 export interface TelegramSendResult {

@@ -519,9 +519,9 @@ export function useVoiceRoom() {
     });
   }, []);
 
-  // Send Text or Voice Note Message (Instant push to Firebase RTDB)
-  const sendMessage = useCallback((text: string, audioClip?: string) => {
-    if (!text.trim() && !audioClip) return;
+  // Send Text, Voice Note, or Gallery Image Message (Instant push to Firebase RTDB)
+  const sendMessage = useCallback((text: string, audioClip?: string, imageUrl?: string) => {
+    if (!text.trim() && !audioClip && !imageUrl) return;
     const currentRoom = roomIdRef.current;
     if (!currentRoom) return;
 
@@ -535,6 +535,7 @@ export function useVoiceRoom() {
       text: text.trim(),
       timestamp: Date.now(),
       ...(audioClip ? { audioClip } : {}),
+      ...(imageUrl ? { imageUrl } : {}),
     };
 
     // Optimistic local update
