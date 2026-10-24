@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Send,
   Mic,
@@ -10,6 +10,8 @@ import {
   Maximize2,
   Download,
   Loader2,
+  Play,
+  Pause,
 } from 'lucide-react';
 import { ChatMessage } from '../types';
 
@@ -27,6 +29,194 @@ const QUICK_PHRASES = [
   'দাম কত রাখবেন? 💰',
   'ডিল কনফার্ম! 🤝',
 ];
+
+// Sleek Custom Voice Note Player (Universal iOS Safari & Android WebM/MP4 support)
+interface VoiceNotePlayerProps {
+  src: string;
+  isMe: boolean;
+}
+
+const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ src, isMe }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Auto-repair for iOS Safari:
+  // If user is on an Apple device (iPhone/iPad/Safari) and the audio base64 begins with audio/webm,
+  // the raw recorded bytes were actually AAC/MP4 that was wrongly labeled as webm.
+  // Rewriting the data URL MIME prefix allows iOS Safari's native media engine to decode and play smoothly.
+  const resolvedSrc = useMemo(() => {
+    if (!src) return '';
+    const isApple =
+      typeof navigator !== 'undefined' &&
+      (/iPhone|iPad|iPod|Macintosh/i.test(navigator.userAgent) ||
+        (navigator.platform && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)));
+
+    if (isApple && src.startsWith('data:audio/webm')) {
+      return src.replace(/^data:audio\/webm/i, 'data:audio/mp4');
+    }
+    return src;
+  }, [src]);
+
+  useEffect(() => {
+    const audio = new Audio();
+    audioRef.current = audio;
+    audio.preload = 'metadata';
+    audio.src = resolvedSrc;
+
+    const handleLoadedMetadata = () => {
+      if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+        setDuration(audio.duration);
+      }
+    };
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+      if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+        setDuration(audio.duration);
+      }
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+
+    const handleError = () => {
+      // If error occurs with rewritten src, try fallback to original
+      if (resolvedSrc !== src) {
+        audio.src = src;
+      }
+      setIsPlaying(false);
+    };
+
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
+
+    return () => {
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
+      audio.pause();
+      audio.src = '';
+    };
+  }, [resolvedSrc, src]);
+
+  const togglePlay = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+    } else {
+      try {
+        await audio.play();
+        setIsPlaying(true);
+      } catch (err) {
+        console.warn('Audio play notice:', err);
+        // If play failed on Safari due to webm container, try mp4 swap
+        if (audio.src.includes('audio/webm')) {
+          audio.src = audio.src.replace('audio/webm', 'audio/mp4');
+          try {
+            await audio.play();
+            setIsPlaying(true);
+          } catch {}
+        }
+      }
+    }
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    audio.currentTime = pos * duration;
+    setCurrentTime(audio.currentTime);
+  };
+
+  const formatSecs = (secs: number) => {
+    if (isNaN(secs) || !isFinite(secs) || secs < 0) return '0:00';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  // 16 stylized soundwave bars
+  const WAVE_BARS = [35, 65, 90, 45, 80, 100, 60, 85, 50, 95, 70, 40, 85, 60, 45, 75];
+
+  return (
+    <div
+      className={`mt-2 pt-2 border-t flex items-center gap-2.5 sm:gap-3 w-56 sm:w-64 max-w-full select-none ${
+        isMe ? 'border-white/20' : 'border-zinc-700/60'
+      }`}
+    >
+      {/* Play/Pause Button */}
+      <button
+        type="button"
+        onClick={togglePlay}
+        className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-md transition-all active:scale-95 cursor-pointer ${
+          isMe
+            ? 'bg-white text-orange-600 hover:bg-orange-50'
+            : 'bg-gradient-to-tr from-orange-500 to-amber-500 text-white hover:brightness-110'
+        }`}
+        title={isPlaying ? 'বিরতি দিন' : 'চালান'}
+      >
+        {isPlaying ? (
+          <Pause className="w-4 h-4 fill-current" />
+        ) : (
+          <Play className="w-4 h-4 fill-current ml-0.5" />
+        )}
+      </button>
+
+      {/* Waveform Scrubber */}
+      <div
+        className="flex-1 flex flex-col justify-center gap-1.5 cursor-pointer"
+        onClick={handleSeek}
+      >
+        {/* Animated Waveform bars */}
+        <div className="flex items-center gap-[2.5px] h-6 py-1">
+          {WAVE_BARS.map((heightPercent, idx) => {
+            const barFraction = idx / WAVE_BARS.length;
+            const isPlayed = progressPercent / 100 >= barFraction;
+            return (
+              <div
+                key={idx}
+                style={{ height: `${heightPercent}%` }}
+                className={`flex-1 min-w-[2px] rounded-full transition-all duration-150 ${
+                  isPlayed
+                    ? isMe
+                      ? 'bg-white'
+                      : 'bg-orange-400'
+                    : isMe
+                    ? 'bg-white/40'
+                    : 'bg-zinc-600'
+                } ${isPlaying && isPlayed ? 'animate-pulse' : ''}`}
+              />
+            );
+          })}
+        </div>
+
+        {/* Time label */}
+        <div className="flex items-center justify-between text-[10px] font-mono leading-none">
+          <span className={isMe ? 'text-white/90' : 'text-zinc-400'}>
+            {formatSecs(currentTime)}
+          </span>
+          <span className={isMe ? 'text-white/70' : 'text-zinc-500'}>
+            {duration > 0 ? formatSecs(duration) : '0:00'}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
   messages,
@@ -120,7 +310,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       console.warn('Image compression notice:', err);
     } finally {
       setIsCompressing(false);
-      // Reset input value so user can re-select same file if needed
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -135,7 +324,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     if (e) e.preventDefault();
     const trimmed = inputText.trim();
 
-    // Check if sending text, image, or both
     if (trimmed || selectedImage) {
       const messageText = trimmed || (selectedImage ? '📷 [গ্যালারির ছবি]' : '');
       onSendMessage(messageText, undefined, selectedImage || undefined);
@@ -148,13 +336,36 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     onSendMessage(phrase);
   };
 
-  // Start voice note recording
+  // Start voice note recording with universal cross-platform MIME detection
   const startRecordingVoiceNote = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+
+      // Detect best supported MIME type on user's device
+      // iOS Safari requires audio/mp4 or audio/aac. Chrome/Android prefer audio/webm.
+      let mimeType = '';
+      if (typeof MediaRecorder !== 'undefined') {
+        const candidates = [
+          'audio/mp4;codecs=mp4a.40.2',
+          'audio/mp4',
+          'audio/aac',
+          'audio/webm;codecs=opus',
+          'audio/webm',
+        ];
+        for (const candidate of candidates) {
+          if (MediaRecorder.isTypeSupported(candidate)) {
+            mimeType = candidate;
+            break;
+          }
+        }
+      }
+
+      const recorderOptions: MediaRecorderOptions = mimeType ? { mimeType } : {};
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
+
+      const actualMimeType = mediaRecorder.mimeType || mimeType || 'audio/mp4';
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -163,17 +374,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
-          const base64Audio = reader.result as string;
+          let base64Audio = reader.result as string;
+          // Ensure correct MIME header
+          if (
+            base64Audio.startsWith('data:;base64,') ||
+            base64Audio.startsWith('data:application/octet-stream;base64,')
+          ) {
+            base64Audio = base64Audio.replace(/^data:[^;]*;base64,/, `data:${actualMimeType};base64,`);
+          }
           onSendMessage('🎤 [ভয়েস নোট]', base64Audio);
         };
         stream.getTracks().forEach((track) => track.stop());
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(250);
       setIsRecordingNote(true);
       setRecordingDuration(0);
 
@@ -288,7 +506,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                             time: msg.timestamp,
                           })
                         }
-                        className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/75 text-white opacity-0 group-hover:opacity-100 transition shadow"
+                        className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/75 text-white opacity-0 group-hover:opacity-100 transition shadow cursor-pointer"
                         title="বড় করে দেখুন"
                       >
                         <Maximize2 className="w-3.5 h-3.5" />
@@ -303,11 +521,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     </p>
                   )}
 
-                  {/* Voice note audio player */}
+                  {/* Beautiful Custom Voice Note Player (Universal cross-platform) */}
                   {msg.audioClip && (
-                    <div className="mt-2 pt-1 border-t border-white/20">
-                      <audio controls src={msg.audioClip} className="h-7 w-48 max-w-full" />
-                    </div>
+                    <VoiceNotePlayer src={msg.audioClip} isMe={isMe} />
                   )}
                 </div>
 
@@ -359,7 +575,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           <button
             type="button"
             onClick={handleRemoveSelectedImage}
-            className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition"
+            className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition cursor-pointer"
             title="ছবি বাতিল করুন"
           >
             <X className="w-4 h-4" />
@@ -378,7 +594,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             <button
               type="button"
               onClick={stopRecordingVoiceNote}
-              className="flex items-center gap-1 px-3 py-1 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 transition"
+              className="flex items-center gap-1 px-3 py-1 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700 transition cursor-pointer"
             >
               <Square className="w-3 h-3 fill-white" />
               পাঠান
@@ -392,7 +608,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               onClick={() => fileInputRef.current?.click()}
               disabled={isCompressing}
               title="গ্যালারি থেকে ছবি বা স্ক্রিনশট শেয়ার করুন"
-              className={`p-2.5 rounded-xl border transition flex items-center justify-center ${
+              className={`p-2.5 rounded-xl border transition flex items-center justify-center cursor-pointer ${
                 selectedImage
                   ? 'bg-orange-500/20 text-orange-400 border-orange-500/50'
                   : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-orange-400 border-zinc-700/60'
@@ -410,7 +626,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               type="button"
               onClick={startRecordingVoiceNote}
               title="ভয়েস নোট রেকর্ড করুন"
-              className="p-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-orange-400 border border-zinc-700/60 transition"
+              className="p-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-orange-400 border border-zinc-700/60 transition cursor-pointer"
             >
               <Mic className="w-4 h-4" />
             </button>
